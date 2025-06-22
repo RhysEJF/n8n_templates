@@ -1,0 +1,295 @@
+{
+  "name": "Detect Pro/Contra Narratives",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "feedUrl": "https://www.google.com/alerts/feeds/12254772602100657129/16808085471630190739"
+      },
+      "type": "n8n-nodes-base.rssFeedReadTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "82efdbe1-d638-49b3-8e03-46017cbaccbd",
+      "name": "RSS Feed Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Try to access RSS data directly from the RSS step\nlet rssData = {};\nlet httpData = {};\n\ntry {\n  // Replace 'RSS Read' with the actual name of your RSS node\n  rssData = $('RSS Feed Trigger').item.json || {};\n  console.log('RSS data found:', JSON.stringify(rssData, null, 2));\n} catch (e) {\n  console.log('Could not access RSS step directly:', e.message);\n  try {\n    // Try alternative names for RSS node\n    rssData = $('RSS').item.json || {};\n  } catch (e2) {\n    console.log('No RSS data accessible');\n  }\n}\n\ntry {\n  httpData = $('HTTP Request1').item.json || {};\n} catch (e) {\n  console.log('No HTTP data accessible');\n}\n\n// Extract HTML content\nconst htmlContent = httpData.data || '';\n\n// Extract RSS metadata\nconst title = rssData.title || '';\nconst snippet = rssData.contentSnippet || rssData.content || rssData.summary || '';\nconst articleUrl = rssData.link || '';\n\n// Extract article content from HTML (simplified version)\nlet extractedContent = '';\nif (htmlContent) {\n  // Remove scripts, styles, and get text content\n  extractedContent = htmlContent\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<[^>]*>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  // Limit length\n  if (extractedContent.length > 3000) {\n    extractedContent = extractedContent.substring(0, 3000) + '...';\n  }\n}\n\n// Use extracted content if substantial, otherwise RSS snippet\nconst useExtracted = extractedContent.length > 200;\nconst fullContent = useExtracted ? extractedContent : snippet;\nconst memoryContent = [`You've just read this content: ${fullContent}`];\n\n// Rally API payload\nconst rallyPayload = {\n  smart: false,\n  provider: \"openai\",\n  query: \"After reading that content, how has your interest in spending money on synthetic research changed? A) Much more interested, B) Somewhat more interested, C) No change, D) Somewhat less interested, E) Much less interested\",\n  audience_id: \"r8eb276513d8241\",\n  \"voting_mode\": true,\n  mode: \"fast\",\n  manual_memories: memoryContent,\n};\n\nreturn {\n  title: title,\n  content: snippet,\n  url: articleUrl,\n  fullContent: fullContent,\n  rallyPayload: rallyPayload,\n  extractedLength: extractedContent.length,\n  usedExtracted: useExtracted,\n  debug: {\n    rssDataAvailable: Object.keys(rssData).length > 0,\n    rssKeys: Object.keys(rssData),\n    hasTitle: !!title,\n    hasUrl: !!articleUrl,\n    htmlLength: htmlContent.length\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "id": "f95c364d-733a-4512-a754-933478d29339",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "REPLACE WITH RALLY API END POINT",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json.rallyPayload}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        0
+      ],
+      "id": "6f9a4aca-411d-414d-bee2-fcbf1186a537",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "WaZtZVWIgLjZZwTa",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "REPLACE WITH YOUR EMAIL",
+        "subject": "={{ $json.analysis.message }}",
+        "message": "=Title:   {{$node[\"RSS Feed Trigger\"].json[\"title\"]}}\nURL:     {{$node[\"Code\"].json[\"url\"]}}\nContent: {{$node[\"Code\"].json[\"fullContent\"]}}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1740,
+        0
+      ],
+      "id": "aca248fd-5d4d-4fc8-abec-cf0f94bc8fbc",
+      "name": "Gmail",
+      "webhookId": "d47ea3ca-9545-4638-a6f5-b25374cf0760",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "whOIhaWRN1PVV0wR",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ \n  (() => {\n    const url = $json.link;\n    if (url.includes('google.com/url')) {\n      const match = url.match(/[&?]url=([^&]+)/);\n      return match ? decodeURIComponent(match[1]) : url;\n    }\n    return url;\n  })() \n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "74919e81-560e-427b-98df-572bc8695cde",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "content": "## Extract content from RSS alert",
+        "height": 300,
+        "width": 480
+      },
+      "id": "90c8aaf9-f88c-4854-baca-d4508dfae18b",
+      "name": "Sticky Note",
+      "position": [
+        160,
+        -120
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## Ask Rally",
+        "height": 300,
+        "width": 720,
+        "color": 5
+      },
+      "id": "1e4062d4-5d02-4c06-b071-c9098e7e5d09",
+      "name": "Sticky Note4",
+      "position": [
+        660,
+        -120
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "responses",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        960,
+        0
+      ],
+      "id": "2784a6dd-dbcc-44f3-866b-ddcaafd17c69",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Steps 1–3: Gather all incoming items, init counters & tally votes\nconst items       = $input.all();\nconst totalVoters = items.length;\n\nconst voteCounts = {\n  A: 0,\n  B: 0,\n  C: 0,\n  D: 0,\n  E: 0,\n};\n\nfor (const item of items) {\n  try {\n    // each item.json.response is a JSON string like '{\"option\":\"B\",...}'\n    const data   = JSON.parse(item.json.response);\n    const option = data.option;\n    if (voteCounts.hasOwnProperty(option)) {\n      voteCounts[option]++;\n    }\n  } catch (err) {\n    console.log(`Error parsing response for persona ${item.json.persona_id}:`, err.message);\n  }\n}\n\n// Steps 4–5: Compute percentages & narrative aggregates\nconst percentages = {};\nfor (const opt of Object.keys(voteCounts)) {\n  percentages[opt] = totalVoters > 0\n    ? Math.round((voteCounts[opt] / totalVoters) * 100)\n    : 0;\n}\n\nconst proNarrative    = percentages.A + percentages.B;\nconst contraNarrative = percentages.D + percentages.E;\nconst neutral         = percentages.C;\n\n// Return a single summary object wrapped in an array\nreturn [\n  {\n    json: {\n      totalVoters,\n      voteCounts,\n      percentages,\n      proNarrative,\n      contraNarrative,\n      neutral,\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        0
+      ],
+      "id": "0655dd89-71da-406a-9d23-321924f32fdf",
+      "name": "analyze simulation results"
+    },
+    {
+      "parameters": {
+        "content": "## Send an Alert",
+        "height": 300,
+        "width": 540,
+        "color": 6
+      },
+      "id": "f89ff0ef-b7ed-4f6a-ba5a-c9fcd7189c1a",
+      "name": "Sticky Note1",
+      "position": [
+        1400,
+        -120
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read the pre-computed summary from the previous node\nconst {\n  totalVoters,\n  voteCounts,\n  percentages,\n  proNarrative,\n  contraNarrative,\n  neutral\n} = $input.item.json;\n\n// Decide notification type & message\nlet notificationType, message;\n\nif (proNarrative >= 75) {\n  notificationType = 'pro-narrative';\n  message = `🟢 Pro-Narrative Detected: ${proNarrative}% voted A+B ` +\n            `(${percentages.A}% A, ${percentages.B}% B)`;\n} else if (contraNarrative >= 75) {\n  notificationType = 'contra-narrative';\n  message = `🔴 Contra-Narrative Detected: ${contraNarrative}% voted D+E ` +\n            `(${percentages.D}% D, ${percentages.E}% E)`;\n} else {\n  notificationType = 'mixed';\n  message = `⚪ Mixed Response: Pro=${proNarrative}%, ` +\n            `Contra=${contraNarrative}%, Neutral=${neutral}%`;\n}\n\n// Return only the analysis\nreturn [\n  {\n    json: {\n      analysis: {\n        totalVoters,\n        voteCounts,\n        percentages,\n        proNarrative,\n        contraNarrative,\n        neutral,\n        notificationType,\n        message,\n        shouldNotify: proNarrative >= 75 || contraNarrative >= 75\n      }\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1480,
+        0
+      ],
+      "id": "44558231-38bd-4f69-aa79-dba2e7024a1d",
+      "name": "alert trigger"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "RSS Feed Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "analyze simulation results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "analyze simulation results": {
+      "main": [
+        [
+          {
+            "node": "alert trigger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "alert trigger": {
+      "main": [
+        [
+          {
+            "node": "Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "928fb10e-ff38-45b3-b0ef-2f9c40c00b17",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e7edbb8f3aa3d5d1631a21cb8cab0e2bb8ae88e9936fc176642c186bd51b82c7"
+  },
+  "id": "pzY3a5Vjwy6NgbOj",
+  "tags": [
+    {
+      "createdAt": "2025-06-22T20:47:30.466Z",
+      "updatedAt": "2025-06-22T20:47:30.466Z",
+      "id": "5AmSz2lDXwZFmZ6B",
+      "name": "News Pipeline Testing"
+    }
+  ]
+}
