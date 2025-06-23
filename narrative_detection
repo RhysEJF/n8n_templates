@@ -18,7 +18,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "ENTER ASKRALLY ENDPOINT HERE",
+        "url": "ENTER RALLY API END POINT HERE",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
@@ -150,7 +150,7 @@
     },
     {
       "parameters": {
-        "url": "ENTER YOUR GOOGLE ALERT RSS LINK HERE",
+        "url": "https://www.google.com/alerts/feeds/12254772602100657129/16808085471630190739",
         "options": {}
       },
       "type": "n8n-nodes-base.rssFeedRead",
