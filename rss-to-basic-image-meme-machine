@@ -44,7 +44,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "ENTER RALLY API ENDPOINT",
+        "url": "https://backend-staging-858a.up.railway.app/api/v1/chat",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
@@ -107,7 +107,7 @@
     },
     {
       "parameters": {
-        "url": ""YOUR_ALERT_FEED_URL"",
+        "url": "https://www.google.com/alerts/feeds/12254772602100657129/16808085471630190739",
         "options": {}
       },
       "id": "2a469f23-076e-4136-b477-b547588c699d",
@@ -140,7 +140,7 @@
     },
     {
       "parameters": {
-        "url": ""YOUR_ALERT_FEED_URL"",
+        "url": "https://www.google.com/alerts/feeds/12254772602100657129/10246758638327575231",
         "options": {}
       },
       "id": "a58d45fb-0d4d-46b2-adf0-ab326abc50a3",
@@ -154,7 +154,7 @@
     },
     {
       "parameters": {
-        "url": ""YOUR_ALERT_FEED_URL"",
+        "url": "https://www.google.com/alerts/feeds/12254772602100657129/1689606288350529848",
         "options": {}
       },
       "id": "cee3572f-ad34-4b72-811d-ff2ecca044ba",
@@ -168,7 +168,7 @@
     },
     {
       "parameters": {
-        "url": ""YOUR_ALERT_FEED_URL"",
+        "url": "https://www.google.com/alerts/feeds/12254772602100657129/125719305669051346",
         "options": {}
       },
       "id": "541081d0-7ed3-42dc-ab91-058c53e6f6a2",
@@ -182,7 +182,7 @@
     },
     {
       "parameters": {
-        "url": ""YOUR_ALERT_FEED_URL"",
+        "url": "https://www.google.com/alerts/feeds/12254772602100657129/4107866991761615820",
         "options": {}
       },
       "id": "60113ba9-6342-4f92-982f-7363b595edbc",
@@ -196,7 +196,7 @@
     },
     {
       "parameters": {
-        "url": ""YOUR_ALERT_FEED_URL"",
+        "url": "https://www.google.com/alerts/feeds/12254772602100657129/8477455582161935404",
         "options": {}
       },
       "id": "4b9655fb-289e-4d8a-9ca2-c52bedf716b4",
@@ -414,7 +414,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=ENTER RALLY API ENDPOINT",
+        "url": "=enter rally api end point",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
@@ -684,7 +684,7 @@
     },
     {
       "parameters": {
-        "sendTo": "rhys@irrealitylabs.com",
+        "sendTo": "Enter Your Email",
         "subject": "=",
         "message": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;\">\n\n  <!-- Header -->\n  <div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;\">\n    <h2 style=\"margin: 0; color: #333;\">📢 AskRally Meme Drop</h2>\n  </div>\n\n  <!-- Persona Data -->\n  <div style=\"background-color: #ffffff; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 20px;\">\n    <h3 style=\"color: #495057; margin-top: 0; border-bottom: 2px solid #dee2e6; padding-bottom: 10px;\">\n      🧠 {{$json.template}} 🦠\n    </h3>\n    <p><strong>Image Copy:</strong><br/>\n    <em style=\"color: #6c757d;\">{{$json.imageCopy}}</em></p>\n\n    <p><strong>Post Copy:</strong><br/>\n    {{$json.postCopy}}</p>\n\n    <p><strong>Thumbnail Preview:</strong></p>\n    <a href=\"{{$json.webViewLink}}\" target=\"_blank\">\n      <img src=\"{{$json.thumbnailLink}}\" \n           alt=\"Persona Thumbnail\" \n           style=\"width: 100%; max-width: 500px; height: auto; border-radius: 6px; border: 1px solid #ccc;\">\n    </a>\n  </div>\n\n  <!-- Footer -->\n  <div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; font-size: 12px; color: #6c757d;\">\n    <p style=\"margin: 0;\">\n      Powered by \n      <a href=\"https://askrally.com/?utm_source=api&utm_medium=email&utm_campaign=rss-to-meme-machine-v1\" \n         style=\"color: #007bff; text-decoration: none;\">\n         AskRally.com\n      </a>\n    </p>\n  </div>\n\n</div>\n",
         "options": {}
@@ -732,7 +732,7 @@
           "value": "1gzzLUXWdLgKiIjTcXfiAt4rxzf-H9PIc",
           "mode": "list",
           "cachedResultName": " n8n-memes",
-          "cachedResultUrl": "YOUR CACHED RESULT URL"
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1gzzLUXWdLgKiIjTcXfiAt4rxzf-H9PIc"
         },
         "options": {}
       },
@@ -1098,11 +1098,11 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "7b7392b8-f138-41a9-a6cb-95cec93b3b96",
+  "versionId": "52f8b909-6c94-4451-98bf-05ba458882ae",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "7921b3cd29c1121b3ec4f2177acf06fe1f1325838297f593db7db4e9563eb98d"
