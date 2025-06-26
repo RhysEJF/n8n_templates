@@ -1,0 +1,1112 @@
+{
+  "name": "Meme Machine",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Multi-item deduplication + time filter + URL extraction (FIXED VERSION)\nconst items = $input.all();\nconst hoursThreshold = 24; // 24 hours\nconst now = new Date();\n\nconsole.log(`Processing ${items.length} RSS items for deduplication, filtering, and URL extraction`);\nconsole.log(`Current time: ${now.toISOString()}`);\n\n// Helper functions\nfunction stripTags(str) {\n  return (str || '').replace(/<[^>]+>/g, '').trim();\n}\n\nfunction normalizeTitle(title) {\n  return stripTags(title)\n    .replace(/\\s*–.*$/, '')  // Remove \" – AMI\", \" – Mi3\" suffixes\n    .replace(/\\s*-.*$/, '')  // Remove \" - AMI\", \" - Mi3\" suffixes  \n    .toLowerCase()\n    .trim();\n}\n\nfunction extractCleanUrl(originalUrl) {\n  let cleanUrl = originalUrl;\n  if (originalUrl && originalUrl.includes('google.com/url')) {\n    const match = originalUrl.match(/[&?]url=([^&]+)/);\n    if (match) {\n      try {\n        cleanUrl = decodeURIComponent(match[1]);\n      } catch (error) {\n        cleanUrl = originalUrl;\n      }\n    }\n  }\n  return cleanUrl;\n}\n\n// Step 1: Time filtering\nconst timeFilteredItems = items.filter((item, index) => {\n  try {\n    const pubDate = new Date(item.json.pubDate || item.json.isoDate);\n    const ageInHours = (now - pubDate) / (1000 * 60 * 60);\n    \n    console.log(`Item ${index}: \"${item.json.title}\"`);\n    console.log(`  Published: ${pubDate.toISOString()}`);\n    console.log(`  Age: ${ageInHours.toFixed(1)} hours`);\n    \n    if (ageInHours <= hoursThreshold) {\n      console.log(`✅ Item ${index} passed time filter`);\n      return true;\n    } else {\n      console.log(`❌ Item ${index} filtered out (too old)`);\n      return false;\n    }\n  } catch (error) {\n    console.log(`⚠️ Error processing item ${index}:`, error.message);\n    return false;\n  }\n});\n\nconsole.log(`After time filter: ${timeFilteredItems.length} items remaining`);\n\n// Step 2: Process items with URL extraction first, then deduplicate\nconst processedItems = timeFilteredItems.map((item, index) => {\n  const originalUrl = item.json.link;\n  const cleanUrl = extractCleanUrl(originalUrl);\n  const normalizedTitle = normalizeTitle(item.json.title);\n  \n  return {\n    json: {\n      ...item.json,\n      cleanUrl: cleanUrl,\n      normalizedTitle: normalizedTitle\n    }\n  };\n});\n\n// Step 3: IMPROVED Deduplication using normalized titles\nconst seenItems = new Set();\nconst deduplicatedItems = processedItems.filter((item, index) => {\n  const uniqueKey = item.json.normalizedTitle;  // Just use normalized title for dedup\n  \n  console.log(`Checking item ${index} for duplicates:`);\n  console.log(`  Original title: \"${item.json.title}\"`);\n  console.log(`  Normalized title: \"${item.json.normalizedTitle}\"`);\n  console.log(`  Clean URL: \"${item.json.cleanUrl}\"`);\n  \n  if (seenItems.has(uniqueKey)) {\n    console.log(`🔄 Duplicate found: \"${item.json.normalizedTitle}\" - removing`);\n    return false;\n  } else {\n    seenItems.add(uniqueKey);\n    console.log(`✅ Item ${index} is unique - keeping`);\n    return true;\n  }\n});\n\nconsole.log(`Final result: ${deduplicatedItems.length} items after time filter + dedup + URL extraction`);\nconsole.log(`Items being returned:`, deduplicatedItems.map(item => item.json.normalizedTitle));\n\n// Return the processed items\nreturn deduplicatedItems;"
+      },
+      "id": "2e53f82f-5353-4058-b65b-bf17e01fba68",
+      "name": "filter",
+      "position": [
+        440,
+        560
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "numberInputs": 6
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        280,
+        500
+      ],
+      "id": "f7909961-1aa2-4c7a-88e6-82e81ac8a987",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract content and prepare Rally API payload - Using Clean Text Field\nlet rssData = {};\nlet httpData = {};\nlet toTextData = {};\n\ntry {\n  rssData = $('filter').item.json || {};\n} catch (e) {\n  console.log('No RSS data accessible:', e.message);\n}\n\ntry {\n  httpData = $('HTTP: Get Content1').item.json || {};\n} catch (e) {\n  console.log('No HTTP data accessible:', e.message);\n}\n\ntry {\n  toTextData = $('to text').item.json || {};\n} catch (e) {\n  console.log('No “to text” data accessible:', e.message);\n}\n\nconst sourceText     = toTextData.text || '';\nconst extractedTitle = httpData.title  || '';\nconst snippet        = rssData.contentSnippet || rssData.content || rssData.summary || '';\nconst articleUrl     = rssData.cleanUrl       || rssData.link    || '';\n\n// Select memory source, falling back to snippet if empty or JS-blocker\nconst badJsMsg    = 'JavaScript is not available.';\nconst memorySource = (!sourceText || sourceText.startsWith(badJsMsg))\n  ? snippet\n  : sourceText;\n\nconst memoryContent = [\n  `You've just read this content: ${memorySource}`\n];\n\n// Rally API payload\nconst rallyPayload = {\n  smart: false,\n  provider: \"openai\",\n  query: \"After reading that content, how has your interest in spending money on synthetic research changed? A) Much more interested, B) Somewhat more interested, C) No change, D) Somewhat less interested, E) Much less interested\",\n  audience_id: \"r8eb276513d8241\",\n  voting_mode: true,\n  mode: \"fast\",\n  manual_memories: memoryContent,\n};\n\n// Return result\nreturn {\n  title:           extractedTitle || rssData.title || \"\",\n  content:         snippet,\n  url:             articleUrl,\n  cleanTextLength: (httpData.text || \"\").length,\n  usedCleanText:   !!(httpData.text && httpData.text.length > 200),\n  rallyPayload:    rallyPayload,\n  debug: {\n    sourceTextLength:    sourceText.length,\n    memorySourceFallbacked: memorySource === snippet,\n    toTextDataFound:     Object.keys(toTextData).length > 0,\n    rssDataFound:        Object.keys(rssData).length > 0,\n    httpDataFound:       Object.keys(httpData).length > 0\n  }\n};\n"
+      },
+      "id": "418fd821-b103-4a04-96f9-ddccac146652",
+      "name": "prep simulation",
+      "position": [
+        1000,
+        180
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "ENTER RALLY API ENDPOINT",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json.rallyPayload}}",
+        "options": {}
+      },
+      "id": "fe2e8663-5b48-4b1b-86b4-bde6b626fb29",
+      "name": "call AskRally",
+      "position": [
+        1200,
+        180
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "wSoUK2sXm0c8MCMq",
+          "name": "Bearer Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# Step1: Get Content",
+        "height": 1100,
+        "width": 1000
+      },
+      "id": "1181cc9d-be42-4484-9b3e-12333d4ce94e",
+      "name": "Sticky Note2",
+      "position": [
+        -80,
+        40
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Process each Rally API response individually\nconst item = $input.item.json;\n\nlet voteCounts = { A: 0, B: 0, C: 0, D: 0, E: 0 };\nlet totalVoters = 0;\nlet responses = [];\n\ntry {\n  if (item.responses && Array.isArray(item.responses)) {\n    totalVoters = item.responses.length;\n    for (const personaResponse of item.responses) {\n      try {\n        const data = JSON.parse(personaResponse.response);\n        const option = data.option;\n        if (option && voteCounts.hasOwnProperty(option)) {\n          voteCounts[option]++;\n        }\n        responses.push({\n          persona_id: personaResponse.persona_id,\n          option: option,\n          thinking: data.thinking || '',\n          thoughts: personaResponse.thoughts\n        });\n      } catch (parseErr) {\n        console.log(`Error parsing persona ${personaResponse.persona_id} response:`, parseErr.message);\n      }\n    }\n  }\n} catch (err) {\n  console.log('Error processing Rally response:', err.message);\n}\n\n// Calculate percentages\nconst percentages = {};\nfor (const opt of Object.keys(voteCounts)) {\n  percentages[opt] = totalVoters > 0\n    ? Math.round((voteCounts[opt] / totalVoters) * 100)\n    : 0;\n}\n\nconst proNarrative   = percentages.A + percentages.B;\nconst contraNarrative= percentages.D + percentages.E;\nconst neutral        = percentages.C;\n\n// --- NEW SAMPLING LOGIC: up to 5 from each bucket ---\nconst proGroup     = responses.filter(r => ['A','B'].includes(r.option));\nconst neutralGroup = responses.filter(r => r.option === 'C');\nconst contraGroup  = responses.filter(r => ['D','E'].includes(r.option));\n\nconst samplePro     = proGroup.sort(() => 0.5 - Math.random()).slice(0, 5);\nconst sampleNeutral = neutralGroup.sort(() => 0.5 - Math.random()).slice(0, 5);\nconst sampleContra  = contraGroup.sort(() => 0.5 - Math.random()).slice(0, 5);\n\nconst sampleResponses = [\n  ...samplePro,\n  ...sampleNeutral,\n  ...sampleContra\n];\n\n// Determine predicted_pipeline_impact as before\nlet predicted_pipeline_impact = '';\nif (proNarrative >= 75) {\n  predicted_pipeline_impact = 'pro-narrative';\n} else if (contraNarrative >= 75) {\n  predicted_pipeline_impact = 'contra-narrative';\n} else {\n  predicted_pipeline_impact = 'mixed';\n}\n\n// Return individual result for this RSS item\nreturn {\n  // Rally simulation metadata\n  session_id: item.session_id || '',\n  title:      item.title      || 'Interest in Synthetic Research Spending',\n  \n  // Rally simulation results\n  totalVoters,\n  voteCounts,\n  percentages,\n  proNarrative,\n  contraNarrative,\n  neutral,\n  responses,\n  summary: item.summary || '',\n  \n  // Pre-selected sample responses for email (up to 15 total)\n  sampleResponses,\n  predicted_pipeline_impact,\n  \n  // Metadata\n  simulationId: item.session_id \n    || `sim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n  \n  // Debug info\n  debug: {\n    foundResponses:       !!item.responses,\n    responseCount:        item.responses ? item.responses.length : 0,\n    hasSessionId:         !!item.session_id,\n    proSampleCount:       samplePro.length,\n    neutralSampleCount:   sampleNeutral.length,\n    contraSampleCount:    sampleContra.length,\n    totalSampleResponses: sampleResponses.length\n  }\n};"
+      },
+      "id": "34cbaabc-e9d0-4a25-b138-cf99ad631cf0",
+      "name": "analyze simulation results1",
+      "position": [
+        1480,
+        180
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": ""YOUR_ALERT_FEED_URL"",
+        "options": {}
+      },
+      "id": "2a469f23-076e-4136-b477-b547588c699d",
+      "name": "RSS Read6",
+      "position": [
+        0,
+        180
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "05e15dd2-7269-4a85-89d2-bc871cadb9d4",
+      "name": "Schedule Trigger1",
+      "position": [
+        -520,
+        540
+      ],
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "url": ""YOUR_ALERT_FEED_URL"",
+        "options": {}
+      },
+      "id": "a58d45fb-0d4d-46b2-adf0-ab326abc50a3",
+      "name": "RSS Read7",
+      "position": [
+        0,
+        340
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "url": ""YOUR_ALERT_FEED_URL"",
+        "options": {}
+      },
+      "id": "cee3572f-ad34-4b72-811d-ff2ecca044ba",
+      "name": "RSS Read8",
+      "position": [
+        0,
+        500
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "url": ""YOUR_ALERT_FEED_URL"",
+        "options": {}
+      },
+      "id": "541081d0-7ed3-42dc-ab91-058c53e6f6a2",
+      "name": "RSS Read9",
+      "position": [
+        0,
+        660
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "url": ""YOUR_ALERT_FEED_URL"",
+        "options": {}
+      },
+      "id": "60113ba9-6342-4f92-982f-7363b595edbc",
+      "name": "RSS Read10",
+      "position": [
+        0,
+        820
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "url": ""YOUR_ALERT_FEED_URL"",
+        "options": {}
+      },
+      "id": "4b9655fb-289e-4d8a-9ca2-c52bedf716b4",
+      "name": "RSS Read11",
+      "position": [
+        0,
+        980
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "content": "# Step 2: Simulate Pipeline Impact From Industry News",
+        "height": 320,
+        "width": 740,
+        "color": 6
+      },
+      "id": "a25098bf-1c08-45c3-9fec-ffe4a116618d",
+      "name": "Sticky Note3",
+      "position": [
+        940,
+        40
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.cleanUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+            },
+            {
+              "name": "Accept-Language",
+              "value": " en-US,en;q=0.5"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Upgrade-Insecure-Requests",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 2
+            }
+          },
+          "response": {
+            "response": {}
+          }
+        }
+      },
+      "id": "5ebc79fb-3fd0-4f17-a6d8-b45b0c8c8c52",
+      "name": "HTTP: Get Content1",
+      "position": [
+        600,
+        560
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simple HTML Text Extractor for n8n Code Node - Process All Items\n// Removes HTML tags and extracts clean text from any webpage\n\n// Get all input items using n8n syntax\nconst items = $input.all();\n\nconsole.log(`🔍 Processing ${items.length} items for text extraction`);\n\n// Simple but effective text extraction function\nfunction extractCleanText(html) {\n  // Remove script and style elements completely\n  let cleanHtml = html\n    .replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, '')\n    .replace(/<style\\b[^<]*(?:(?!<\\/style>)<[^<]*)*<\\/style>/gi, '')\n    .replace(/<nav\\b[^<]*(?:(?!<\\/nav>)<[^<]*)*<\\/nav>/gi, '')\n    .replace(/<header\\b[^<]*(?:(?!<\\/header>)<[^<]*)*<\\/header>/gi, '')\n    .replace(/<footer\\b[^<]*(?:(?!<\\/footer>)<[^<]*)*<\\/footer>/gi, '')\n    .replace(/<aside\\b[^<]*(?:(?!<\\/aside>)<[^<]*)*<\\/aside>/gi, '');\n  \n  // Extract title\n  const titleMatch = cleanHtml.match(/<title[^>]*>([^<]+)<\\/title>/i);\n  const title = titleMatch ? titleMatch[1].trim() : 'No title found';\n  \n  // Remove all HTML tags\n  let text = cleanHtml\n    .replace(/<[^>]+>/g, ' ')  // Remove all HTML tags\n    .replace(/&nbsp;/gi, ' ')  // Replace &nbsp; with space\n    .replace(/&amp;/gi, '&')   // Replace &amp; with &\n    .replace(/&lt;/gi, '<')    // Replace &lt; with <\n    .replace(/&gt;/gi, '>')    // Replace &gt; with >\n    .replace(/&quot;/gi, '\"')  // Replace &quot; with \"\n    .replace(/&#\\d+;/g, ' ')   // Remove other HTML entities\n    .replace(/\\s+/g, ' ')      // Replace multiple spaces with single space\n    .trim();\n  \n  // Filter out common unwanted text patterns\n  const unwantedPatterns = [\n    /cookie/i, /advertisement/i, /subscribe/i, /newsletter/i,\n    /privacy policy/i, /terms of service/i, /follow us/i, /share this/i\n  ];\n  \n  // Split into sentences and filter\n  const sentences = text.split(/[.!?]+/).filter(sentence => {\n    const s = sentence.trim();\n    if (s.length < 20) return false;  // Skip very short sentences\n    if (unwantedPatterns.some(pattern => pattern.test(s))) return false;  // Skip unwanted content\n    return true;\n  });\n  \n  return {\n    title: title,\n    text: sentences.join('. ').trim(),\n    sentences: sentences,\n    originalLength: html.length,\n    cleanLength: text.length\n  };\n}\n\n// Process all items and return array of results\nconst results = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  \n  try {\n    // Get the HTML content from current item\n    const html = item.binary?.data\n      ? Buffer.from(item.binary.data.data, 'base64').toString()\n      : item.json.body || item.json.data || item.json.html;\n\n    const url = item.json.url || `Item ${i + 1}`;\n    \n    console.log(`📄 Processing item ${i + 1}/${items.length}: ${url}`);\n    console.log(`   HTML length: ${html.length} characters`);\n    \n    const extracted = extractCleanText(html);\n    \n    console.log(`   ✅ Extracted: \"${extracted.title}\"`);\n    console.log(`   📝 Clean text: ${extracted.cleanLength} characters`);\n    console.log(`   📄 Found ${extracted.sentences.length} sentences`);\n    \n    results.push({\n      // Preserve original item data\n      ...item.json,\n      // Add extracted text data\n      title: extracted.title,\n      text: extracted.text,\n      sentences: extracted.sentences,\n      url: url,\n      wordCount: extracted.text.split(/\\s+/).length,\n      sentenceCount: extracted.sentences.length,\n      compressionRatio: Math.round((extracted.cleanLength / extracted.originalLength) * 100),\n      success: true,\n      itemIndex: i\n    });\n    \n  } catch (error) {\n    console.error(`❌ Error processing item ${i + 1}:`, error.message);\n    \n    results.push({\n      // Preserve original item data\n      ...item.json,\n      // Add error data\n      title: 'Error',\n      text: '',\n      url: item.json.url || `Item ${i + 1}`,\n      wordCount: 0,\n      success: false,\n      error: error.message,\n      itemIndex: i\n    });\n  }\n}\n\nconsole.log(`🎉 Completed processing ${results.length} items`);\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        560
+      ],
+      "id": "582ae5df-7c5e-4aa6-bfd6-d1d6d5c72112",
+      "name": "to text"
+    },
+    {
+      "parameters": {
+        "content": "## Human In The Loop",
+        "height": 420,
+        "width": 880,
+        "color": 7
+      },
+      "id": "4147ccc3-80cc-469d-9005-caa689929974",
+      "name": "Sticky Note5",
+      "position": [
+        1700,
+        1180
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "# Step 3: Seed Meme Idea",
+        "height": 380,
+        "width": 740,
+        "color": 5
+      },
+      "id": "6a90a8b2-bdf4-4691-a88b-4acb197a0561",
+      "name": "Sticky Note8",
+      "position": [
+        940,
+        380
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten all simulations that arrive on the wire\nconst sims = $input.all().flatMap(item => {\n  // Each item may already wrap its data under simulation_results\n  const arr = item.json.simulation_results ?? [item.json];\n\n  // Pick just the fields we want from every simulation object\n  return arr.map(({ percentages, summary, sampleResponses }) => ({\n    percentages,\n    summary,\n    sampleResponses\n  }));\n});\n\n// Return one tidy object\nreturn [\n  {\n    json: { simulation_results: sims }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        460
+      ],
+      "id": "15e85c66-00ca-40c0-804c-5fec758c34dd",
+      "name": "Code3"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "o3-mini",
+          "mode": "list",
+          "cachedResultName": "O3-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a B2B GTM strategist.\n\nTASK  \n-----\nParse *every* simulation’s `percentages` and `sampleResponses`.\n\n1. **Theme mining**  \n   • List the narrative motifs that appear in ≥ 2 “A/B” comments (what excites buyers).  \n   • List the motifs that appear in ≥ 2 “D/E” comments (what scares buyers).  \n   • For each motif give a one-line proof quote (trimmed) and a tally of how many times it shows up.\n\n2. **Counter-intuition hunt**  \n   • Compare the two lists. Look for a pattern that is *not* obvious from headline voting alone   \n   • Formulate one commercially valuable insight for Ask Rally: a sentence that reveals this hidden tension and how to exploit it in messaging.\n\n3. **Craft two memes**  \n   • *meme_to_boost* – <60 chars; amplifies a winning motif.  \n   • *meme_to_nuke* – <60 chars; disarms a losing motif.\n\nOUTPUT  \n------\nReturn **only** a JSON object that follows exactly this schema & order\n(keep keys snake_case, no extra keys, max 280 chars total per string):\n\n```json\n{\n  \"insight\": \"string\",\n  \"meme_to_boost\": \"string\",\n  \"meme_to_nuke\": \"string\"\n}\n• Do not summarise anything outside the JSON.\n\n",
+              "role": "=system"
+            },
+            {
+              "content": "=“simulation_results”: {{ JSON.stringify(\n     $json.simulation_results.map(\n       ({ percentages, sampleResponses }) =>\n         ({ percentages, sampleResponses })\n     ),\n     null,\n     2\n) }}\n\n"
+            }
+          ]
+        },
+        "simplify": false,
+        "jsonOutput": true,
+        "options": {}
+      },
+      "id": "b5858bf7-5e92-48e5-967c-75f155485213",
+      "name": "Message a model4",
+      "position": [
+        1000,
+        600
+      ],
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "o3-mini",
+          "mode": "list",
+          "cachedResultName": "O3-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a meme-strategist for a B2B SaaS brand called Ask Rally, an AI-persona simulation platform.\n\n✦ OBJECTIVE\nGenerate ONE fresh meme concept that:\n• Makes professionals laugh, then see the product’s value.\n• Draws some inspo from **content**\n\n✦ WHAT TO DELIVER\nReturn your answer in **exactly this JSON** so designers can build it fast:\n\n{\n  \"title\": \"<3-5 word name for the meme>\",\n  \"template\": \"an original visual concept\",\n   \"image copy\": \"any copy that should overlay the image\",\n  \"postCopy\": \"<tweet caption,\n description>\",\n  \"whyItWorks\": \"<1-sentence rationale tying humor device to the insight>\"\n}\n\n✦ CREATIVE GUARDRAILS\n• Feel free to pick *any* meme style\n  or invent a simple image with text above gag. Surprise us.  \n• Humor devices allowed: exaggeration, contrast, status flex, sudden incongruity, unpopular truth, Status flex + absurd premise , Relatable panic, Dark left-field twist, Mismatched voice) \n• No overt dystopia, fear-mongering, or replacing humans; AI = empowering sidekick.  \n• Stay brand-risk on; be bold and brave\n• Sets up an everyday business pain or trope.\n• Smashes it with an exaggerated or totally mismatched punch-line.\n• Leaves just enough gap for the reader to “get the joke” on their own.\n\n✦ INPUTS\n{\n  \"content\": \"insight from our research\",\n}\n\n✦ OUTPUT ONLY THE JSON — no extra commentary.",
+              "role": "=system"
+            },
+            {
+              "content": "=\"content\": {{ JSON.stringify($json[\"choices\"][0].message.content) }}\n"
+            }
+          ]
+        },
+        "simplify": false,
+        "jsonOutput": true,
+        "options": {}
+      },
+      "id": "5db3327a-8e82-4ae4-89cd-701d47e54bed",
+      "name": "Message a model5",
+      "position": [
+        1340,
+        600
+      ],
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=ENTER RALLY API ENDPOINT",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "smart",
+              "value": "false"
+            },
+            {
+              "name": "provider",
+              "value": "google"
+            },
+            {
+              "name": "query",
+              "value": "=You're scrolling LinkedIn during a lunch walk break and you see the following memes. Which would you leave a laugh reaction on?:\n\n{{ \n  $json.choices[0].message.content.memes\n    .map((m,i) => \n      `${String.fromCharCode(97 + i)}) Template: ${m.memeTemplate}\\n` +\n      `Image copy: ${m.imageCopy}\\n` +\n      `Post copy: ${m.postCopy}`\n    )\n    .join('\\n\\n')\n}}\n\n"
+            },
+            {
+              "name": "audience_id",
+              "value": "rb842b547c27640"
+            },
+            {
+              "name": "voting_mode",
+              "value": "true"
+            },
+            {
+              "name": "audience_id",
+              "value": "r8eb276513d8241"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4d7d282c-2797-4386-b104-0e2bcdabc05b",
+      "name": "Ask Rally",
+      "position": [
+        1800,
+        160
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "wSoUK2sXm0c8MCMq",
+          "name": "Bearer Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "responses",
+        "options": {}
+      },
+      "id": "a59420c5-0706-444c-bf8c-7b8e05329f40",
+      "name": "Get Individual Votes",
+      "position": [
+        2020,
+        160
+      ],
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1) Count how many people picked each letter (a,b,c…)\nlet optionCounts = {}, total = 0;\nfor (const item of $input.all()) {\n  try {\n    const r = JSON.parse(item.json.response);\n    if (r.option) {\n      total++;\n      optionCounts[r.option] = (optionCounts[r.option] || 0) + 1;\n    }\n  } catch (e) {\n    console.log(`⚠️ bad JSON for persona ${item.json.persona_id}:`, e.message);\n  }\n}\n\n// 2) Pull the real `simulation_results` out of *your* LLM node\nlet adVariations = [];\ntry {\n  // replace \"Message a model6\" with whatever your Chat node is actually called\n  const llm = $node[\"Message a model6\"].json;\n  adVariations = llm.choices[0].message.content.simulation_results || [];\n} catch (e) {\n  console.log(\"⚠️ couldn’t find simulation_results:\", e.message);\n}\n\n// 3) Zip counts ↔️ meme objects and compute %\nconst variationsWithAds = [];\nfor (const [opt, cnt] of Object.entries(optionCounts)) {\n  const pct = total ? (cnt/total*100).toFixed(1) : \"0.0\";\n  const idx = opt.charCodeAt(0) - 97;        // a→0, b→1…\n  const m   = adVariations[idx] || {};\n  variationsWithAds.push({\n    option:     opt,\n    count:      cnt,\n    percentage: parseFloat(pct),\n    template:   m.memeTemplate || \"—\",\n    imageCopy:  m.imageCopy    || \"—\",\n    postCopy:   m.postCopy     || \"—\",\n  });\n}\n\n// 4) Sort by highest CTR and log\nvariationsWithAds.sort((a,b)=>b.percentage - a.percentage);\nconsole.log(`Total responses: ${total}`);\nvariationsWithAds.forEach(v=>{\n  console.log(`${v.option.toUpperCase()}) ${v.template} — ${v.count} clicks (${v.percentage}%)`);\n});\n\n// 5) Return for downstream\nreturn { total, variationsWithAds };\n"
+      },
+      "id": "9e7dcdfc-b6b7-44d3-98a4-141b38c7842d",
+      "name": "Calculate CTR",
+      "position": [
+        1800,
+        400
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "content": "## Fan Out Creative\nGenerate 8 new creative variations based on the original.",
+        "height": 360,
+        "width": 740,
+        "color": 2
+      },
+      "id": "6e856777-7302-4c8b-8cd8-b88e24d73b43",
+      "name": "Sticky Note13",
+      "position": [
+        940,
+        780
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## Synthetic Testing\nTake 8 new variations and test them against the original.",
+        "height": 500,
+        "width": 540,
+        "color": 4
+      },
+      "id": "587b3c8a-2d9b-41f3-8eea-fd41ba8479b6",
+      "name": "Sticky Note12",
+      "position": [
+        1700,
+        40
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "o3-mini",
+          "mode": "list",
+          "cachedResultName": "O3-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Come up with 8 new very creative variations on this meme idea by changing the image copy, postCopy. Do not deviate from the core creative idea (title/template), just express it in more creative ways. image copy can be up to 24 words, while post copy can be 140 characters. Only respond with an array of meme template, image copy and postCopy combinations. Always start with the original Headline and Description you were given as the first in the list, then add your 8 new variations after.\n\n## Business we are trying to create commercial value for Ask Rally, an AI-persona simulation platform.\n\n## Examples  \nHere are some examples to show you what the task looks like when done well.  \nYou should not use these examples in your output—always make **new** variations relevant to the brand.\n\n**Original Meme:**\n- memeTemplate: \"Smug Yacht Laptop\"\n- imageCopy: \"Exit plan: simulate, scale, sail, settle… …who needs compliance when you're on a yacht.\"\n- postCopy: \"Sail past red tape—run an AI persona sim before regulators even clock in. #PowerYourGenius\"\n\n**Output:**\n\n```json\n[\n  {\n    \"memeTemplate\": \"Smug Yacht Laptop\",\n    \"imageCopy\": \"Exit plan: simulate, scale, sail, settle… …who needs compliance when you're on a yacht.\",\n    \"postCopy\": \"Sail past red tape—run an AI persona sim before regulators even clock in.\"\n  },\n  {\n    \"memeTemplate\": \"Conspiracy Keanu\",\n    \"imageCopy\": \"WHEN U SCREW UP A FIRST IMPRESSION… …AND LEARN U COULD HAVE SIMULATED IT WITH AI PERSONAS\",\n    \"postCopy\": \"That face when you realise gut-check ≠ sim-check.\n  },\n  {\n    \"memeTemplate\": \"Chat-Bubble Screenshot\",\n    \"imageCopy\": \"Text: 'When an AI company I invested in has a North Korean spy'\n    \"postCopy\": \"Even ridiculous scenarios deserve a quick focus-group sim.\"\n  },\n  {\n    \"memeTemplate\": \"Uncalibrated Redneck\",\n    \"imageCopy\": \"UNCALIBRATED AI PERSONAS BE LIKE: 'THINK I NEED TO REDUCE MY CARBON FOOTPRINT'\",\n    \"postCopy\": \"Mullet logic? Calibrate those personas before you trust the take.  \n  }\n]\n",
+              "role": "=system"
+            },
+            {
+              "content": "=\"simulation_results\": {{ JSON.stringify($json[\"choices\"][0].message.content) }}\n"
+            }
+          ]
+        },
+        "simplify": false,
+        "jsonOutput": true,
+        "options": {}
+      },
+      "id": "041f21cb-6ff0-4131-ad6d-cd2c85d56808",
+      "name": "Message a model6",
+      "position": [
+        1360,
+        920
+      ],
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Creative generation",
+        "height": 580,
+        "width": 880,
+        "color": 7
+      },
+      "id": "2738b9d0-1921-4083-9ebe-e45a96ad6e43",
+      "name": "Sticky Note14",
+      "position": [
+        1700,
+        560
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "76861df4-8aa5-4ddf-99ba-908ab20f9c6e",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.message.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4759a487-3225-46d4-80c7-ec2c6898cf52",
+      "name": "Description",
+      "position": [
+        2080,
+        640
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "prompt": "={{ $json.description }}",
+        "options": {}
+      },
+      "id": "87efda79-3420-4294-af3b-7de04c223dbb",
+      "name": "Generate Image",
+      "position": [
+        1760,
+        860
+      ],
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "cachedResultName": "CHATGPT-4O-LATEST",
+          "mode": "list",
+          "value": "chatgpt-4o-latest"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are an art director for a satire publication, and your job is to describe what the meme image should look like when given a winning meme idea. Be brief, and only return the details that are most essential to making an unforgettable image. Only return the description, no other text.",
+              "role": "system"
+            },
+            {
+              "content": "=Briefly describe what image would make sense for the featured image on this meme idea:\n\nwinner: Template: {{ $json.template }}\nImage copy: {{ $json.imageCopy }}\nPost copy: {{ $json.postCopy }}\n\n\n"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "171d7ece-90fc-430d-92d3-91def18eb96d",
+      "name": "Write Description1",
+      "position": [
+        1760,
+        640
+      ],
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1) Grab your CTR payload\nconst item = $input.item.json;\nconst variations = item.variationsWithAds || [];\nif (variations.length === 0) {\n  throw new Error('No variationsWithAds[] found');\n}\n\n// 2) Pick the winner by highest percentage\nconst winnerRec = variations.reduce((best, cur) =>\n  cur.percentage > (best.percentage||0) ? cur : best,\n  {}\n);\n\n// 3) Pull in your model6 output\nconst NODE = 'Message a model6';    // ← must match your workflow\nconst m6 = ($items(NODE)[0] || {}).json;\nif (!m6) throw new Error(`No data from node \"${NODE}\"`);\nconst content = m6.choices?.[0]?.message?.content;\nif (!content) {\n  console.log('Full model6 JSON:', JSON.stringify(m6, null, 2));\n  throw new Error(`Couldn’t find .choices[0].message.content in \"${NODE}\"`);\n}\n\n// 4) Find your array (or single object) of creatives\nlet pool = content.memes || content.simulation_results;\nif (!Array.isArray(pool)) {\n  // fallback to single‐object pattern\n  pool = [{\n    template:   content.template,\n    imageCopy:  content['image copy'] || content.imageCopy,\n    postCopy:   content['post copy']  || content.postCopy,\n  }];\n}\n\n// 5) Safely convert your option letter to an index\nlet idx = 0;\nif (typeof winnerRec.option === 'string') {\n  const o = winnerRec.option.trim().toLowerCase();\n  if (/^[a-z]$/.test(o)) {\n    const i = o.charCodeAt(0) - 97;\n    if (i >= 0 && i < pool.length) idx = i;\n  }\n}\n\n// 6) Enrich the winner and return\nconst full = pool[idx] || {};\nreturn [{\n  json: {\n    // carry forward your CTR stats\n    total:      item.total,\n    option:     winnerRec.option,\n    count:      winnerRec.count,\n    percentage: winnerRec.percentage,\n    // bring in the creative fields\n    template:   full.memeTemplate || full.template   || '',\n    imageCopy:  full.imageCopy      || full['image copy'] || '',\n    postCopy:   full.postCopy       || full['post copy']  || '',\n  }\n}];\n\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        400
+      ],
+      "id": "28a5b81b-c7be-47c0-a96e-3f08a2fd17ee",
+      "name": "grab winner"
+    },
+    {
+      "parameters": {
+        "sendTo": "rhys@irrealitylabs.com",
+        "subject": "=",
+        "message": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;\">\n\n  <!-- Header -->\n  <div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;\">\n    <h2 style=\"margin: 0; color: #333;\">📢 AskRally Meme Drop</h2>\n  </div>\n\n  <!-- Persona Data -->\n  <div style=\"background-color: #ffffff; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 20px;\">\n    <h3 style=\"color: #495057; margin-top: 0; border-bottom: 2px solid #dee2e6; padding-bottom: 10px;\">\n      🧠 {{$json.template}} 🦠\n    </h3>\n    <p><strong>Image Copy:</strong><br/>\n    <em style=\"color: #6c757d;\">{{$json.imageCopy}}</em></p>\n\n    <p><strong>Post Copy:</strong><br/>\n    {{$json.postCopy}}</p>\n\n    <p><strong>Thumbnail Preview:</strong></p>\n    <a href=\"{{$json.webViewLink}}\" target=\"_blank\">\n      <img src=\"{{$json.thumbnailLink}}\" \n           alt=\"Persona Thumbnail\" \n           style=\"width: 100%; max-width: 500px; height: auto; border-radius: 6px; border: 1px solid #ccc;\">\n    </a>\n  </div>\n\n  <!-- Footer -->\n  <div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; font-size: 12px; color: #6c757d;\">\n    <p style=\"margin: 0;\">\n      Powered by \n      <a href=\"https://askrally.com/?utm_source=api&utm_medium=email&utm_campaign=rss-to-meme-machine-v1\" \n         style=\"color: #007bff; text-decoration: none;\">\n         AskRally.com\n      </a>\n    </p>\n  </div>\n\n</div>\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1780,
+        1260
+      ],
+      "id": "259a39af-6cff-4899-bad0-98cb5ac09690",
+      "name": "Gmail5",
+      "webhookId": "d47ea3ca-9545-4638-a6f5-b25374cf0760",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JFRMn1ji8imM26f4",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2400,
+        840
+      ],
+      "id": "2d1da9e6-3971-41a7-94b7-648471d5c075",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1gzzLUXWdLgKiIjTcXfiAt4rxzf-H9PIc",
+          "mode": "list",
+          "cachedResultName": " n8n-memes",
+          "cachedResultUrl": "YOUR CACHED RESULT URL"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1960,
+        860
+      ],
+      "id": "8c1ca725-9ba8-4f6c-ae93-f5e0b8a97ea9",
+      "name": "Google Drive",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "lolQfCBJjJ6XjXJ3",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "This step extract insights and think up meme ideas. \n\nTip: tweak the prompts\n",
+        "height": 120,
+        "width": 200,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1240,
+        460
+      ],
+      "id": "90412f4b-8f00-4a24-85e0-ef9173dfa34d",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "filter": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Get Content1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prep simulation": {
+      "main": [
+        [
+          {
+            "node": "call AskRally",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call AskRally": {
+      "main": [
+        [
+          {
+            "node": "analyze simulation results1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "analyze simulation results1": {
+      "main": [
+        [
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read6": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "RSS Read6",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read7",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read8",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read9",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read10",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read11",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read7": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "RSS Read8": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "RSS Read9": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "RSS Read10": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "RSS Read11": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "HTTP: Get Content1": {
+      "main": [
+        [
+          {
+            "node": "to text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "to text": {
+      "main": [
+        [
+          {
+            "node": "prep simulation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "Message a model4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model4": {
+      "main": [
+        [
+          {
+            "node": "Message a model5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model5": {
+      "main": [
+        [
+          {
+            "node": "Message a model6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Rally": {
+      "main": [
+        [
+          {
+            "node": "Get Individual Votes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Individual Votes": {
+      "main": [
+        [
+          {
+            "node": "Calculate CTR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate CTR": {
+      "main": [
+        [
+          {
+            "node": "grab winner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model6": {
+      "main": [
+        [
+          {
+            "node": "Ask Rally",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Description": {
+      "main": [
+        [
+          {
+            "node": "Generate Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image": {
+      "main": [
+        [
+          {
+            "node": "Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Description1": {
+      "main": [
+        [
+          {
+            "node": "Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "grab winner": {
+      "main": [
+        [
+          {
+            "node": "Write Description1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Gmail5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7b7392b8-f138-41a9-a6cb-95cec93b3b96",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7921b3cd29c1121b3ec4f2177acf06fe1f1325838297f593db7db4e9563eb98d"
+  },
+  "id": "AmlFLnF17HHUvOC9",
+  "tags": []
+}
