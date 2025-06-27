@@ -1,0 +1,518 @@
+{
+  "name": "Generate Veo3 Interview Responses",
+  "nodes": [
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "cachedResultName": "CHATGPT-4O-LATEST",
+          "mode": "list",
+          "value": "chatgpt-4o-latest"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a director of qualitative research at a professional insights agency. Your task is to take an input request for insight and craft a single, emotionally resonant question designed to reveal deep, personal, and meaningful insights from our AI persona, \"________.\" The question should provoke introspection and vulnerability. Respond only with the final question—no explanations or context.\n\nWho is Defender?\nENTER THE PERSONA BACKSTORY HERE",
+              "role": "system"
+            },
+            {
+              "content": "=Request for insight\n# {{ $json[\"What would you like to know?\"] }}\n"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e195a670-3692-451b-a27b-4363b3bb235f",
+      "name": "Write Description",
+      "position": [
+        -620,
+        -140
+      ],
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "76861df4-8aa5-4ddf-99ba-908ab20f9c6e",
+              "name": "description",
+              "type": "string",
+              "value": "=A realistic video interview. The subject is a thoughtful Egyptian-American software engineer in his 30s. He has a warm, expressive face with short, dark hair and wears casual but clean clothing—a simple t-shirt or button-up shirt, possibly with glasses. He’s seated in a modest, sunlit living room, with books, plants, or a bike in the background—suggesting intellectual curiosity and an urban lifestyle. He is speaking directly to a webcam in a reflective, slightly animated tone. His gestures are natural, and his delivery is thoughtful, with occasional pauses as if processing complex ideas. The video has the candid, unscripted feel, where the participant says something to the effect of {{ $json.responses[0].response }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7d05627b-d470-49bd-b896-94d24ad77eb1",
+      "name": "Description",
+      "position": [
+        -100,
+        -140
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "content": "## Generate an Interview Clip",
+        "height": 560,
+        "width": 1500,
+        "color": 4
+      },
+      "id": "22ff723d-947a-408d-8d71-662e784aa26a",
+      "name": "Sticky Note",
+      "position": [
+        60,
+        -280
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## Ask Anything",
+        "height": 560,
+        "width": 940
+      },
+      "id": "80e797f1-b5f8-4b17-a254-7c7c0a30a1a6",
+      "name": "Sticky Note1",
+      "position": [
+        -900,
+        -280
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "=https://queue.fal.run/fal-ai/veo3/requests/{{ $('Create Video1').item.json.request_id }}/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "44f51825-654c-405d-8176-89c06c8f5b1f",
+      "name": "Get status",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        600,
+        -140
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nIInIL9RlBRoMNiE",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "id": "828fbc92-2a96-42a0-8353-9c802803d934",
+      "name": "Wait 60 sec.",
+      "type": "n8n-nodes-base.wait",
+      "position": [
+        400,
+        -140
+      ],
+      "webhookId": "490facb8-d0ae-402e-ab59-a87720cf0bdd",
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "383d112e-2cc6-4dd4-8985-f09ce0bd1781",
+              "operator": {
+                "name": "filter.operator.equals",
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "COMPLETED"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "abc4c36c-b4c3-41af-ab14-d04374fedc81",
+      "name": "Completed?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        800,
+        -140
+      ],
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "url": "=https://queue.fal.run/fal-ai/veo3/requests/{{ $node['Create Video1'].json.request_id }}\n",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "8818900b-bd52-4458-9ff6-5fdce7ed2cd0",
+      "name": "Get Url Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1020,
+        -160
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nIInIL9RlBRoMNiE",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $node[\"Get Url Video\"].json.video.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        -140
+      ],
+      "id": "3e2d5004-52da-4e30-8c8d-5e2c4a0d3a15",
+      "name": "Get File Video"
+    },
+    {
+      "parameters": {
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "https://drive.google.com/drive/u/0/folders/1rF0NoHeZNau5RMClN9HNiZLW2v0JxwQO",
+          "mode": "url"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1040,
+        120
+      ],
+      "id": "e5228c4d-ae95-46c3-a6a0-c7efdb558d5b",
+      "name": "Upload Drive",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "lolQfCBJjJ6XjXJ3",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "formTitle": "Generate Reaction Video",
+        "formDescription": "We will generate a synthetic interview clip for you as if you had asked them in the flesh.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "What would you like to know?",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "f17083d2-50a4-417f-8b3e-92ced6370b62",
+      "name": "Ask AI Personas",
+      "position": [
+        -820,
+        -140
+      ],
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "webhookId": "5af8d646-c0c7-45e1-a943-757612b2d452"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.askrally.com/api/v1/chat",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "smart",
+              "value": "true"
+            },
+            {
+              "name": "provider",
+              "value": "google"
+            },
+            {
+              "name": "query",
+              "value": "={{ $json.message.content }}"
+            },
+            {
+              "name": "audience_id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d5167b40-19f3-4b55-8a9f-7ffacc8d007c",
+      "name": "Ask Rally1",
+      "position": [
+        -280,
+        -140
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "wSoUK2sXm0c8MCMq",
+          "name": "Bearer Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1260,
+        120
+      ],
+      "id": "40697514-4740-4291-8d2b-09bbea73df23",
+      "name": "Download Video",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "lolQfCBJjJ6XjXJ3",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://queue.fal.run/fal-ai/veo3",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "prompt",
+              "value": "={{$json.description}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f0a2d548-95b8-435d-9816-0c9463d76b5b",
+      "name": "Create Video1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        140,
+        -140
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nIInIL9RlBRoMNiE",
+          "name": "Header Auth account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Write Description": {
+      "main": [
+        [
+          {
+            "node": "Ask Rally1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Description": {
+      "main": [
+        [
+          {
+            "node": "Create Video1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get status": {
+      "main": [
+        [
+          {
+            "node": "Completed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 60 sec.": {
+      "main": [
+        [
+          {
+            "node": "Get status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Completed?": {
+      "main": [
+        [
+          {
+            "node": "Get Url Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 60 sec.",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Url Video": {
+      "main": [
+        [
+          {
+            "node": "Get File Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Video": {
+      "main": [
+        [
+          {
+            "node": "Upload Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Drive": {
+      "main": [
+        [
+          {
+            "node": "Download Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask AI Personas": {
+      "main": [
+        [
+          {
+            "node": "Write Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Rally1": {
+      "main": [
+        [
+          {
+            "node": "Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Video1": {
+      "main": [
+        [
+          {
+            "node": "Wait 60 sec.",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f5c06e44-9100-406c-8e2f-9ba81ba0b31d",
+  "meta": {
+    "instanceId": "7921b3cd29c1121b3ec4f2177acf06fe1f1325838297f593db7db4e9563eb98d"
+  },
+  "id": "UhbVKL9Es0L2FUEh",
+  "tags": []
+}
