@@ -1,0 +1,1013 @@
+{
+  "name": "Video Clip Relevance Testing",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Video Generator",
+        "formDescription": "We'll make an on-brand Rally video for you.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Creative Brief",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "5e99c32d-af69-4016-b1e8-9b465e14d4a4",
+      "name": "On form submission",
+      "position": [
+        60,
+        140
+      ],
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "webhookId": "5af8d646-c0c7-45e1-a943-757612b2d452"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "responses",
+        "options": {}
+      },
+      "id": "eeb86dcd-bc72-4016-b9f2-f2fd910a1db5",
+      "name": "Split Out",
+      "position": [
+        1620,
+        700
+      ],
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "cachedResultName": "CHATGPT-4O-LATEST",
+          "mode": "list",
+          "value": "chatgpt-4o-latest"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are an art director for a professional satire publication, and your job is to describe what the short 9 second video should be about when given a Creative brief. Be brief, and only return the details that are most essential to making an unforgettable image. Only return the description, no other text.",
+              "role": "system"
+            },
+            {
+              "content": "=Briefly describe what video would make sense for the creative brief on this blog post:\n\n# {{ $json[\"Creative Brief\"] }}\n"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "526ffa17-8a78-428d-9e21-d8eee0d84d32",
+      "name": "Write Description",
+      "position": [
+        280,
+        140
+      ],
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "76861df4-8aa5-4ddf-99ba-908ab20f9c6e",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.message.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "045a96ac-9211-44ae-aa56-ee9cb228561a",
+      "name": "Description",
+      "position": [
+        680,
+        140
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.askrally.com/api/v1/chat",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\n  \"Content-Type\": \"application/json\",\n  \"Accept\":       \"application/json\"\n}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"smart\": true,\n  \"provider\": \"google\",\n  \"audience_id\": \"r7ea561c4448543\",\n  \"query\": \"after watching this video, what is your takeaway?\",\n  \"files\": [\n    {\n      \"type\": \"video/mp4\",\n      \"url\": \"{{ $node['upload file to rally'].json.url }}\"\n    }\n  ],\n  \"mode\": \"normal\",\n  \"voting_mode\": false\n}",
+        "options": {}
+      },
+      "id": "22c259cc-35d5-42f2-b7b4-15bb4623c084",
+      "name": "Call Rally",
+      "position": [
+        1380,
+        700
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "wSoUK2sXm0c8MCMq",
+          "name": "Bearer Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "89917b29-0c0e-4fde-aff2-7b0ad0a31ba0",
+              "name": "response",
+              "type": "string",
+              "value": "={{ $json.response }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "db489ebc-455d-4d1f-8c17-47a0095748e7",
+      "name": "Response",
+      "position": [
+        1820,
+        700
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "response",
+              "renameField": true,
+              "outputFieldName": "responses"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "375d11a3-9f04-402f-9837-f9a862369b48",
+      "name": "Responses",
+      "position": [
+        2040,
+        700
+      ],
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "cachedResultName": "CHATGPT-4O-LATEST",
+          "mode": "list",
+          "value": "chatgpt-4o-latest"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Do the user reactions to this video indicate that they have understood this is a commercial for a company selling AI personas or synthetic research capabilities?\n\nOnly respond in JSON with key option, value \"YES\", or \"NO\", and key \"feedback\" with brief instructions on what to change to make it more clear this is a commercial promoting AskRally, which lets you run simulations.\n\nResponses: \n{{ $json.responses }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "id": "500bd660-84d3-45bc-90eb-44fb43fce997",
+      "name": "Check Relevance",
+      "position": [
+        1780,
+        940
+      ],
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5dcad326-00a3-41fc-adb8-d9500454db42",
+              "leftValue": "={{ $json.message.content.option }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "=YES"
+            },
+            {
+              "id": "12af9e76-b85b-4a94-8fd8-b8f41edf8e9b",
+              "leftValue": null,
+              "operator": {
+                "operation": "lte",
+                "type": "number"
+              },
+              "rightValue": 3
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "33b56a24-29e8-490d-a9cf-ffb1d2af9b5f",
+      "name": "IF Relevant",
+      "position": [
+        400,
+        620
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "cachedResultName": "CHATGPT-4O-LATEST",
+          "mode": "list",
+          "value": "chatgpt-4o-latest"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are an art director for a professional publication, and your job is to take some feedback from the users on a video commercial, and give direction on how to improve the image for the blog post. Be brief, and only return the details that are most essential to making an unforgettable image. Only return the description, no other text.",
+              "role": "system"
+            },
+            {
+              "content": "=Previous Description:\n{{ $('Description').item.json.description }}\n\nFeedback on Previous Description:\n{{ $('Check Relevance').item.json.message.content.feedback }}\n\nBriefly describe what image would make sense for the featured image on this blog post:\n\n# {{ $('On form submission').item.json['Blog Title'] }}\n\n{{ $('On form submission').item.json['Blog Content'] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5a4ed1ce-9368-4542-9e78-494f6a28c9d1",
+      "name": "Rewrite Description",
+      "position": [
+        280,
+        380
+      ],
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "76861df4-8aa5-4ddf-99ba-908ab20f9c6e",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.message.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b170ad8a-305a-4805-be24-d467a00bf247",
+      "name": "Rewritten Description",
+      "position": [
+        680,
+        380
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "898e7050-6383-435c-874d-b1a391e0cce2",
+              "name": "blog_title",
+              "type": "string",
+              "value": "={{ $('On form submission').item.json['Blog Title'] }}"
+            },
+            {
+              "id": "11fe07a1-7a88-4330-b40c-15b469992f1b",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $('Description').item.json.description }}"
+            },
+            {
+              "id": "ebb22d76-da49-44e3-b569-b494d640a796",
+              "name": "feedback",
+              "type": "string",
+              "value": "={{ $json.message.content.feedback }}"
+            },
+            {
+              "id": "56163736-4341-4971-a169-0948228e86e8",
+              "name": "image_url",
+              "type": "string",
+              "value": "={{ $('Get URL').item.json.fullUrl }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3db2ab65-1764-4928-9e12-f87e232817ca",
+      "name": "Sheets Fields",
+      "position": [
+        620,
+        600
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ { \"counter\": $json.counter + 1 } }}",
+        "options": {}
+      },
+      "id": "c59cdae7-36fd-4d46-b73a-5ac7fbe129ac",
+      "name": "Increment Counter",
+      "position": [
+        0,
+        620
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3c98c5b9-0080-44cf-bca6-678388569e58",
+              "name": "counter",
+              "type": "number",
+              "value": 1
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4f23cc49-0250-4ce8-8d14-9e2069394f90",
+      "name": "Counter",
+      "position": [
+        200,
+        620
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "content": "## Generate an video",
+        "height": 560,
+        "width": 1500,
+        "color": 4
+      },
+      "id": "1864f9a1-d117-4bfd-bc62-31a40576ad14",
+      "name": "Sticky Note",
+      "position": [
+        900,
+        0
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## Generate a Description",
+        "height": 560,
+        "width": 940
+      },
+      "id": "789e515f-8538-4d47-a1d3-2bb29c5d3fb0",
+      "name": "Sticky Note1",
+      "position": [
+        -60,
+        0
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## Ask Rally Audience",
+        "height": 620,
+        "width": 1500,
+        "color": 5
+      },
+      "id": "cd0b5164-bdfc-4767-8bdc-ae9ec91e8f29",
+      "name": "Sticky Note2",
+      "position": [
+        900,
+        580
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "=https://queue.fal.run/fal-ai/kling-video/requests/{{ $('Create Video1').item.json.request_id }}/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "54a3f3a3-c94f-48ab-bbce-489ccdf30c4b",
+      "name": "Get status",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1460,
+        140
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nIInIL9RlBRoMNiE",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "id": "aa1f210c-568a-414c-87bd-000b6e27947c",
+      "name": "Wait 60 sec.",
+      "type": "n8n-nodes-base.wait",
+      "position": [
+        1280,
+        140
+      ],
+      "webhookId": "490facb8-d0ae-402e-ab59-a87720cf0bdd",
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "383d112e-2cc6-4dd4-8985-f09ce0bd1781",
+              "operator": {
+                "name": "filter.operator.equals",
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "COMPLETED"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "35ea8af3-7bbc-47f9-bf14-bea3c0ed7b7f",
+      "name": "Completed?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        1640,
+        140
+      ],
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "url": "=https://queue.fal.run/fal-ai/kling-video/requests/{{$node[\"Create Video1\"].json[\"request_id\"]}}\n",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "efceb49f-2b34-4abb-aa84-adc7fef59c0e",
+      "name": "Get Url Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1880,
+        140
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nIInIL9RlBRoMNiE",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://queue.fal.run/fal-ai/kling-video/v1.6/pro/text-to-video",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "prompt",
+              "value": "={{$json.description}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "26e2bda7-6919-4286-a9b7-afc0548bb338",
+      "name": "Create Video1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1000,
+        140
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nIInIL9RlBRoMNiE",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $node[\"Get Url Video\"].json.video.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2060,
+        140
+      ],
+      "id": "adafb031-2998-429b-8f31-58946e02c95f",
+      "name": "Get File Video"
+    },
+    {
+      "parameters": {
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "https://drive.google.com/drive/u/0/folders/1rF0NoHeZNau5RMClN9HNiZLW2v0JxwQO",
+          "mode": "url"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1880,
+        400
+      ],
+      "id": "fac46061-218d-4829-8036-dd5688bb63fe",
+      "name": "Upload Drive",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "lolQfCBJjJ6XjXJ3",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2100,
+        400
+      ],
+      "id": "66457188-826d-4ea4-ab3b-a3cda70736a4",
+      "name": "Download Vidoeo",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "lolQfCBJjJ6XjXJ3",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.askrally.com/api/v1/files/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        700
+      ],
+      "id": "90dbec42-ebf2-4763-b66b-a4d193a09f25",
+      "name": "upload file to rally",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "wSoUK2sXm0c8MCMq",
+          "name": "Bearer Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "### Choose your model ☝️ ",
+        "height": 80,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        940,
+        320
+      ],
+      "id": "15593d90-2d00-4340-954b-e8e6c1b69455",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "### set correct endpoint settings 👇 ",
+        "height": 80,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1900,
+        40
+      ],
+      "id": "5da50c78-b86e-4898-bb60-cb7e9323e621",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "### set correct endpoint settings 👇 ",
+        "height": 80,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1460,
+        40
+      ],
+      "id": "22e82bc3-4b2c-4fc1-85fb-b8250b1ab8e6",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "### Adjust Prompt 👉",
+        "height": 80,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        1000
+      ],
+      "id": "87b3c244-39a1-49c1-a070-4941dd6bbfee",
+      "name": "Sticky Note6"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Call Rally": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Relevance": {
+      "main": [
+        [
+          {
+            "node": "IF Relevant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Counter": {
+      "main": [
+        [
+          {
+            "node": "IF Relevant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Description": {
+      "main": [
+        [
+          {
+            "node": "Create Video1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Relevant": {
+      "main": [
+        [
+          {
+            "node": "Sheets Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Increment Counter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Increment Counter": {
+      "main": [
+        [
+          {
+            "node": "Rewrite Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Write Description",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Counter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response": {
+      "main": [
+        [
+          {
+            "node": "Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responses": {
+      "main": [
+        [
+          {
+            "node": "Check Relevance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rewrite Description": {
+      "main": [
+        [
+          {
+            "node": "Rewritten Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rewritten Description": {
+      "main": [
+        [
+          {
+            "node": "Create Video1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Fields": {
+      "main": [
+        []
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Description": {
+      "main": [
+        [
+          {
+            "node": "Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Completed?": {
+      "main": [
+        [
+          {
+            "node": "Get Url Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 60 sec.",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get status": {
+      "main": [
+        [
+          {
+            "node": "Completed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 60 sec.": {
+      "main": [
+        [
+          {
+            "node": "Get status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Url Video": {
+      "main": [
+        [
+          {
+            "node": "Get File Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Video1": {
+      "main": [
+        [
+          {
+            "node": "Wait 60 sec.",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Video": {
+      "main": [
+        [
+          {
+            "node": "Upload Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Drive": {
+      "main": [
+        [
+          {
+            "node": "Download Vidoeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Vidoeo": {
+      "main": [
+        [
+          {
+            "node": "upload file to rally",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "upload file to rally": {
+      "main": [
+        [
+          {
+            "node": "Call Rally",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "026aba41-5713-4592-8d45-63d7cdaf53e9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7921b3cd29c1121b3ec4f2177acf06fe1f1325838297f593db7db4e9563eb98d"
+  },
+  "id": "vKcEWBqGHl7A2kZY",
+  "tags": []
+}
