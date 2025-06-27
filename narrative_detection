@@ -1,24 +1,50 @@
 {
-  "name": "narrative monitoring",
+  "name": "narrative monitoring v2",
   "nodes": [
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// Extract content and prepare Rally API payload\nlet rssData = {};\nlet httpData = {};\n\ntry {\n  // Get RSS data from the dedup + URL extraction step\n  rssData = $('Dedup + url extraction').item.json || {};\n} catch (e) {\n  console.log('No RSS data accessible:', e.message);\n}\n\ntry {\n  // Get HTTP data from the content fetching step\n  httpData = $('Get Content').item.json || {};\n} catch (e) {\n  console.log('No HTTP data accessible:', e.message);\n}\n\n// Extract HTML content\nconst htmlContent = httpData.data || httpData.body || '';\n\n// Extract RSS metadata\nconst title = rssData.title || '';\nconst snippet = rssData.contentSnippet || rssData.content || rssData.summary || '';\nconst articleUrl = rssData.cleanUrl || rssData.link || '';\n\n// Extract article content from HTML\nlet extractedContent = '';\nif (htmlContent) {\n  extractedContent = htmlContent\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<[^>]*>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  // Limit length\n  if (extractedContent.length > 3000) {\n    extractedContent = extractedContent.substring(0, 3000) + '...';\n  }\n}\n\n// Use extracted content if substantial, otherwise RSS snippet\nconst useExtracted = extractedContent.length > 200;\nconst fullContent = useExtracted ? extractedContent : snippet;\nconst memoryContent = [`You've just read this content: ${fullContent}`];\n\n// Rally API payload\nconst rallyPayload = {\n  smart: false,\n  provider: \"openai\",\n  query: \"After reading that content, how has your interest in spending money on synthetic research changed? A) Much more interested, B) Somewhat more interested, C) No change, D) Somewhat less interested, E) Much less interested\",\n  audience_id: \"r8eb276513d8241\",\n  voting_mode: true,\n  mode: \"fast\",\n  manual_memories: memoryContent,\n};\n\nreturn {\n  title: title,\n  content: snippet,\n  url: articleUrl,\n  fullContent: fullContent,\n  rallyPayload: rallyPayload,\n  extractedLength: extractedContent.length,\n  usedExtracted: useExtracted,\n  debug: {\n    hasTitle: !!title,\n    hasUrl: !!articleUrl,\n    htmlLength: htmlContent.length,\n    rssDataFound: Object.keys(rssData).length > 0,\n    httpDataFound: Object.keys(httpData).length > 0\n  }\n};"
+        "jsCode": "// Multi-item deduplication + time filter + URL extraction (FIXED VERSION)\nconst items = $input.all();\nconst hoursThreshold = 24; // 24 hours\nconst now = new Date();\n\nconsole.log(`Processing ${items.length} RSS items for deduplication, filtering, and URL extraction`);\nconsole.log(`Current time: ${now.toISOString()}`);\n\n// Helper functions\nfunction stripTags(str) {\n  return (str || '').replace(/<[^>]+>/g, '').trim();\n}\n\nfunction normalizeTitle(title) {\n  return stripTags(title)\n    .replace(/\\s*–.*$/, '')  // Remove \" – AMI\", \" – Mi3\" suffixes\n    .replace(/\\s*-.*$/, '')  // Remove \" - AMI\", \" - Mi3\" suffixes  \n    .toLowerCase()\n    .trim();\n}\n\nfunction extractCleanUrl(originalUrl) {\n  let cleanUrl = originalUrl;\n  if (originalUrl && originalUrl.includes('google.com/url')) {\n    const match = originalUrl.match(/[&?]url=([^&]+)/);\n    if (match) {\n      try {\n        cleanUrl = decodeURIComponent(match[1]);\n      } catch (error) {\n        cleanUrl = originalUrl;\n      }\n    }\n  }\n  return cleanUrl;\n}\n\n// Step 1: Time filtering\nconst timeFilteredItems = items.filter((item, index) => {\n  try {\n    const pubDate = new Date(item.json.pubDate || item.json.isoDate);\n    const ageInHours = (now - pubDate) / (1000 * 60 * 60);\n    \n    console.log(`Item ${index}: \"${item.json.title}\"`);\n    console.log(`  Published: ${pubDate.toISOString()}`);\n    console.log(`  Age: ${ageInHours.toFixed(1)} hours`);\n    \n    if (ageInHours <= hoursThreshold) {\n      console.log(`✅ Item ${index} passed time filter`);\n      return true;\n    } else {\n      console.log(`❌ Item ${index} filtered out (too old)`);\n      return false;\n    }\n  } catch (error) {\n    console.log(`⚠️ Error processing item ${index}:`, error.message);\n    return false;\n  }\n});\n\nconsole.log(`After time filter: ${timeFilteredItems.length} items remaining`);\n\n// Step 2: Process items with URL extraction first, then deduplicate\nconst processedItems = timeFilteredItems.map((item, index) => {\n  const originalUrl = item.json.link;\n  const cleanUrl = extractCleanUrl(originalUrl);\n  const normalizedTitle = normalizeTitle(item.json.title);\n  \n  return {\n    json: {\n      ...item.json,\n      cleanUrl: cleanUrl,\n      normalizedTitle: normalizedTitle\n    }\n  };\n});\n\n// Step 3: IMPROVED Deduplication using normalized titles\nconst seenItems = new Set();\nconst deduplicatedItems = processedItems.filter((item, index) => {\n  const uniqueKey = item.json.normalizedTitle;  // Just use normalized title for dedup\n  \n  console.log(`Checking item ${index} for duplicates:`);\n  console.log(`  Original title: \"${item.json.title}\"`);\n  console.log(`  Normalized title: \"${item.json.normalizedTitle}\"`);\n  console.log(`  Clean URL: \"${item.json.cleanUrl}\"`);\n  \n  if (seenItems.has(uniqueKey)) {\n    console.log(`🔄 Duplicate found: \"${item.json.normalizedTitle}\" - removing`);\n    return false;\n  } else {\n    seenItems.add(uniqueKey);\n    console.log(`✅ Item ${index} is unique - keeping`);\n    return true;\n  }\n});\n\nconsole.log(`Final result: ${deduplicatedItems.length} items after time filter + dedup + URL extraction`);\nconsole.log(`Items being returned:`, deduplicatedItems.map(item => item.json.normalizedTitle));\n\n// Return the processed items\nreturn deduplicatedItems;"
       },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "2005bdd8-40a8-43fd-bcd0-ec597387be3a",
+      "name": "filter",
       "position": [
-        600,
-        0
+        460,
+        600
       ],
-      "id": "52dc2d74-fe6a-422c-9be9-d14b68250afc",
-      "name": "Code"
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "numberInputs": 6
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        300,
+        540
+      ],
+      "id": "3f6401c9-4cea-4595-8e43-338ed19d857a",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract content and prepare Rally API payload - Using Clean Text Field\nlet rssData = {};\nlet httpData = {};\nlet toTextData = {};\n\ntry {\n  rssData = $('filter').item.json || {};\n} catch (e) {\n  console.log('No RSS data accessible:', e.message);\n}\n\ntry {\n  httpData = $('HTTP: Get Content1').item.json || {};\n} catch (e) {\n  console.log('No HTTP data accessible:', e.message);\n}\n\ntry {\n  toTextData = $('to text').item.json || {};\n} catch (e) {\n  console.log('No “to text” data accessible:', e.message);\n}\n\nconst sourceText     = toTextData.text || '';\nconst extractedTitle = httpData.title  || '';\nconst snippet        = rssData.contentSnippet || rssData.content || rssData.summary || '';\nconst articleUrl     = rssData.cleanUrl       || rssData.link    || '';\n\n// Select memory source, falling back to snippet if empty or JS-blocker\nconst badJsMsg    = 'JavaScript is not available.';\nconst memorySource = (!sourceText || sourceText.startsWith(badJsMsg))\n  ? snippet\n  : sourceText;\n\nconst memoryContent = [\n  `You've just read this content: ${memorySource}`\n];\n\n// Rally API payload\nconst rallyPayload = {\n  smart: false,\n  provider: \"openai\",\n  query: \"After reading that content, has your willingness to allocate more budget toward {REPLACE WITH YOUR INDUSTRY}—especially {REPLACE WITH YOUR SOLUTION CATEGORY}—changed? If so, how? A)  I’m now actively looking to invest or expand efforts, B) I’m more open than before, and would consider proposals I might have dismissed, C) No real change—I still hold the same interest (or lack thereof) as before, D)  I’m now more skeptical or cautious about putting resources towards this, E) I’ve become firmly opposed to investing in this space\",\n  audience_id: \"r8eb276513d8241\",\n  voting_mode: true,\n  mode: \"fast\",\n  manual_memories: memoryContent,\n};\n\n// Return result\nreturn {\n  title:           extractedTitle || rssData.title || \"\",\n  content:         snippet,\n  url:             articleUrl,\n  cleanTextLength: (httpData.text || \"\").length,\n  usedCleanText:   !!(httpData.text && httpData.text.length > 200),\n  rallyPayload:    rallyPayload,\n  debug: {\n    sourceTextLength:    sourceText.length,\n    memorySourceFallbacked: memorySource === snippet,\n    toTextDataFound:     Object.keys(toTextData).length > 0,\n    rssDataFound:        Object.keys(rssData).length > 0,\n    httpDataFound:       Object.keys(httpData).length > 0\n  }\n};\n"
+      },
+      "id": "e9aa0e5d-f0cf-410c-99e4-d1ba25a31000",
+      "name": "prep simulation",
+      "position": [
+        1020,
+        480
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "ENTER RALLY API END POINT HERE",
+        "url": "https://api.askrally.com/api/v1/chat",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
@@ -35,14 +61,14 @@
         "jsonBody": "={{$json.rallyPayload}}",
         "options": {}
       },
+      "id": "ec1f6a64-28c2-4155-b312-fdd0af8f419b",
+      "name": "call AskRally",
+      "position": [
+        1300,
+        380
+      ],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        840,
-        0
-      ],
-      "id": "8f134637-f907-4be4-bcf0-0e497b7a711e",
-      "name": "HTTP Request",
       "credentials": {
         "httpBearerAuth": {
           "id": "wSoUK2sXm0c8MCMq",
@@ -52,18 +78,259 @@
     },
     {
       "parameters": {
-        "sendTo": "ENTER YOUR EMAIL HERE",
-        "subject": "={{ $json.message }}",
-        "message": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;\">\n\n<!-- Header Section -->\n<div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;\">\n  <h2 style=\"margin: 0; color: #333;\">📰 AskRally Alert</h2>\n</div>\n\n<!-- Article Information -->\n<div style=\"background-color: #ffffff; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 20px;\">\n  <h3 style=\"color: #495057; margin-top: 0; border-bottom: 2px solid #dee2e6; padding-bottom: 10px;\">\n    📄 Article Details\n  </h3>\n  \n  <p><strong>Title:</strong><br/>\n  {{ $('Code').item.json.title }}</p>\n  \n  <p><strong>URL:</strong><br/>\n  <a href=\"{{$node[\"Code\"].json[\"url\"]}}\" style=\"color: #007bff; text-decoration: none;\">\n    {{$node[\"Code\"].json[\"url\"]}}\n  </a></p>\n  \n  <p><strong>Content Snippet:</strong><br/>\n  <em style=\"color: #6c757d;\">{{ $('Dedup + url extraction').item.json.contentSnippet }}</em></p>\n</div>\n\n<!-- Full Content Section -->\n<div style=\"background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 20px;\">\n  <h3 style=\"color: #495057; margin-top: 0; border-bottom: 2px solid #dee2e6; padding-bottom: 10px;\">\n    📖 Full Content\n  </h3>\n  <div style=\"background-color: #ffffff; padding: 15px; border-radius: 4px; border-left: 4px solid #007bff; font-size: 14px; line-height: 1.6;\">\n    {{$node[\"Code\"].json[\"fullContent\"]}}\n  </div>\n</div>\n\n<!-- Results Section -->\n<div style=\"background-color: #ffffff; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 20px;\">\n  <h3 style=\"color: #495057; margin-top: 0; border-bottom: 2px solid #dee2e6; padding-bottom: 10px;\">\n    📊 Rally Results\n  </h3>\n  \n  <div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 15px;\">\n    <p><strong>{{ $json.message }}</strong></p>\n    <p><strong>Total Voters:</strong> {{ $json.totalVoters }}</p>\n    <p><strong>Pro-Narrative:</strong> {{ $json.proNarrative }}% | \n       <strong>Contra-Narrative:</strong> {{ $json.contraNarrative }}% | \n       <strong>Neutral:</strong> {{ $json.neutral }}%</p>\n  </div>\n\n  <!-- Sample Responses -->\n  <div style=\"background-color: #ffffff; border: 1px solid #dee2e6; border-radius: 4px; padding: 15px;\">\n    <h4 style=\"margin-top: 0; color: #495057;\">💬 Sample Responses</h4>\n    \n    {{\n      (() => {\n        const sampleResponses = $json.sampleResponses || [];\n        const notificationType = $json.notificationType;\n        \n        if (sampleResponses.length === 0) {\n          return '<p style=\"color: #6c757d; font-style: italic;\">No sample responses available.</p>';\n        }\n        \n        let sectionTitle = \"\";\n        let sectionColor = \"\";\n        \n        if (notificationType === 'pro-narrative') {\n          sectionTitle = \"🟢 Pro-Narrative Voices (A & B voters):\";\n          sectionColor = \"#d4edda\";\n        } else if (notificationType === 'contra-narrative') {\n          sectionTitle = \"🔴 Contra-Narrative Voices (D & E voters):\";\n          sectionColor = \"#f8d7da\";\n        } else {\n          sectionTitle = \"⚪ Mixed Responses:\";\n          sectionColor = \"#fff3cd\";\n        }\n        \n        let html = `<div style=\"background-color: ${sectionColor}; padding: 10px; border-radius: 4px; margin-bottom: 10px;\">\n          <strong>${sectionTitle}</strong>\n        </div>`;\n        \n        sampleResponses.forEach((response, index) => {\n          const optionLabel = {\n            'A': 'Much more interested',\n            'B': 'Somewhat more interested', \n            'C': 'No change',\n            'D': 'Somewhat less interested',\n            'E': 'Much less interested'\n          }[response.option] || response.option;\n          \n          html += `\n          <div style=\"border-left: 3px solid #007bff; padding: 10px; margin: 10px 0; background-color: #f8f9fa;\">\n            <p style=\"margin: 0 0 5px 0;\"><strong>Voter ${index + 1} (${response.option} - ${optionLabel}):</strong></p>\n            <p style=\"margin: 0; font-size: 14px; line-height: 1.4; color: #495057;\">\"${response.thinking}\"</p>\n          </div>`;\n        });\n        \n        return html;\n      })()\n    }}\n  </div>\n</div>\n\n<!-- Footer -->\n<div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; font-size: 12px; color: #6c757d;\">\n  <p style=\"margin: 0;\">\n    Powered by <a href=\"https://askrally.com/?utm_source=api&utm_medium=email&utm_campaign=narrative-alerts-n8n\" style=\"color: #007bff; text-decoration: none;\">AskRally.com</a>\n  </p>\n</div>\n\n</div>",
+        "content": "# Step 1: Get Content\n## Extract recent industry news from relevant sources",
+        "height": 1100,
+        "width": 1000
+      },
+      "id": "6acd9ac6-f0d9-4289-b8e9-25653689c461",
+      "name": "Sticky Note2",
+      "position": [
+        -60,
+        80
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Process each Rally API response individually\nconst item = $input.item.json;\n\nlet voteCounts = { A: 0, B: 0, C: 0, D: 0, E: 0 };\nlet totalVoters = 0;\nlet responses = [];\n\ntry {\n  if (item.responses && Array.isArray(item.responses)) {\n    totalVoters = item.responses.length;\n    for (const personaResponse of item.responses) {\n      try {\n        const data = JSON.parse(personaResponse.response);\n        const option = data.option;\n        if (option && voteCounts.hasOwnProperty(option)) {\n          voteCounts[option]++;\n        }\n        responses.push({\n          persona_id: personaResponse.persona_id,\n          option: option,\n          thinking: data.thinking || '',\n          thoughts: personaResponse.thoughts\n        });\n      } catch (parseErr) {\n        console.log(`Error parsing persona ${personaResponse.persona_id} response:`, parseErr.message);\n      }\n    }\n  }\n} catch (err) {\n  console.log('Error processing Rally response:', err.message);\n}\n\n// Calculate percentages\nconst percentages = {};\nfor (const opt of Object.keys(voteCounts)) {\n  percentages[opt] = totalVoters > 0\n    ? Math.round((voteCounts[opt] / totalVoters) * 100)\n    : 0;\n}\n\nconst proNarrative   = percentages.A + percentages.B;\nconst contraNarrative= percentages.D + percentages.E;\nconst neutral        = percentages.C;\n\n// --- NEW SAMPLING LOGIC: up to 5 from each bucket ---\nconst proGroup     = responses.filter(r => ['A','B'].includes(r.option));\nconst neutralGroup = responses.filter(r => r.option === 'C');\nconst contraGroup  = responses.filter(r => ['D','E'].includes(r.option));\n\nconst samplePro     = proGroup.sort(() => 0.5 - Math.random()).slice(0, 5);\nconst sampleNeutral = neutralGroup.sort(() => 0.5 - Math.random()).slice(0, 5);\nconst sampleContra  = contraGroup.sort(() => 0.5 - Math.random()).slice(0, 5);\n\nconst sampleResponses = [\n  ...samplePro,\n  ...sampleNeutral,\n  ...sampleContra\n];\n\n// Determine predicted_pipeline_impact as before\nlet predicted_pipeline_impact = '';\nif (proNarrative >= 75) {\n  predicted_pipeline_impact = 'pro-narrative';\n} else if (contraNarrative >= 75) {\n  predicted_pipeline_impact = 'contra-narrative';\n} else {\n  predicted_pipeline_impact = 'mixed';\n}\n\n// Return individual result for this RSS item\nreturn {\n  // Rally simulation metadata\n  session_id: item.session_id || '',\n  title:      item.title      || 'Interest in Synthetic Research Spending',\n  \n  // Rally simulation results\n  totalVoters,\n  voteCounts,\n  percentages,\n  proNarrative,\n  contraNarrative,\n  neutral,\n  responses,\n  summary: item.summary || '',\n  \n  // Pre-selected sample responses for email (up to 15 total)\n  sampleResponses,\n  predicted_pipeline_impact,\n  \n  // Metadata\n  simulationId: item.session_id \n    || `sim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n  \n  // Debug info\n  debug: {\n    foundResponses:       !!item.responses,\n    responseCount:        item.responses ? item.responses.length : 0,\n    hasSessionId:         !!item.session_id,\n    proSampleCount:       samplePro.length,\n    neutralSampleCount:   sampleNeutral.length,\n    contraSampleCount:    sampleContra.length,\n    totalSampleResponses: sampleResponses.length\n  }\n};"
+      },
+      "id": "6aab3444-47ba-4095-a29e-d366191f68e6",
+      "name": "analyze simulation results1",
+      "position": [
+        1740,
+        460
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "https://www.google.com/alerts/feeds/12254772602100657129/4107866991761615820",
+        "options": {}
+      },
+      "id": "45c7debc-3491-476f-9022-e90aa8016fb6",
+      "name": "RSS Read6",
+      "position": [
+        20,
+        220
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "621699df-a536-4cc0-a58a-106c94d936c2",
+      "name": "Schedule Trigger1",
+      "position": [
+        -500,
+        580
+      ],
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "483a1b4b-3a06-46a3-94ac-78208039f4a3",
+      "name": "RSS Read7",
+      "position": [
+        20,
+        380
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "de7ac6ea-fe0b-4886-8e19-7e5f89374f95",
+      "name": "RSS Read8",
+      "position": [
+        20,
+        540
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "ddd814ec-6ff4-4753-bfa4-722b981ba81a",
+      "name": "RSS Read9",
+      "position": [
+        20,
+        700
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "67c2942e-8a1a-468a-bfb5-238ff798821b",
+      "name": "RSS Read10",
+      "position": [
+        20,
+        860
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "afb8499d-e839-48e5-b4c4-d9c590af94fe",
+      "name": "RSS Read11",
+      "position": [
+        20,
+        1020
+      ],
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "content": "# Step 2: Simulate Pipeline Impact From Industry News",
+        "height": 320,
+        "width": 900,
+        "color": 6
+      },
+      "id": "104b6849-1dea-451d-b6a3-b6a8239f06bd",
+      "name": "Sticky Note3",
+      "position": [
+        960,
+        300
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.cleanUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+            },
+            {
+              "name": "Accept-Language",
+              "value": " en-US,en;q=0.5"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Upgrade-Insecure-Requests",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 2
+            }
+          },
+          "response": {
+            "response": {}
+          }
+        }
+      },
+      "id": "2bac8abc-ee85-4daf-96eb-b4a40708456d",
+      "name": "HTTP: Get Content1",
+      "position": [
+        620,
+        600
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simple HTML Text Extractor for n8n Code Node - Process All Items\n// Removes HTML tags and extracts clean text from any webpage\n\n// Get all input items using n8n syntax\nconst items = $input.all();\n\nconsole.log(`🔍 Processing ${items.length} items for text extraction`);\n\n// Simple but effective text extraction function\nfunction extractCleanText(html) {\n  // Remove script and style elements completely\n  let cleanHtml = html\n    .replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, '')\n    .replace(/<style\\b[^<]*(?:(?!<\\/style>)<[^<]*)*<\\/style>/gi, '')\n    .replace(/<nav\\b[^<]*(?:(?!<\\/nav>)<[^<]*)*<\\/nav>/gi, '')\n    .replace(/<header\\b[^<]*(?:(?!<\\/header>)<[^<]*)*<\\/header>/gi, '')\n    .replace(/<footer\\b[^<]*(?:(?!<\\/footer>)<[^<]*)*<\\/footer>/gi, '')\n    .replace(/<aside\\b[^<]*(?:(?!<\\/aside>)<[^<]*)*<\\/aside>/gi, '');\n  \n  // Extract title\n  const titleMatch = cleanHtml.match(/<title[^>]*>([^<]+)<\\/title>/i);\n  const title = titleMatch ? titleMatch[1].trim() : 'No title found';\n  \n  // Remove all HTML tags\n  let text = cleanHtml\n    .replace(/<[^>]+>/g, ' ')  // Remove all HTML tags\n    .replace(/&nbsp;/gi, ' ')  // Replace &nbsp; with space\n    .replace(/&amp;/gi, '&')   // Replace &amp; with &\n    .replace(/&lt;/gi, '<')    // Replace &lt; with <\n    .replace(/&gt;/gi, '>')    // Replace &gt; with >\n    .replace(/&quot;/gi, '\"')  // Replace &quot; with \"\n    .replace(/&#\\d+;/g, ' ')   // Remove other HTML entities\n    .replace(/\\s+/g, ' ')      // Replace multiple spaces with single space\n    .trim();\n  \n  // Filter out common unwanted text patterns\n  const unwantedPatterns = [\n    /cookie/i, /advertisement/i, /subscribe/i, /newsletter/i,\n    /privacy policy/i, /terms of service/i, /follow us/i, /share this/i\n  ];\n  \n  // Split into sentences and filter\n  const sentences = text.split(/[.!?]+/).filter(sentence => {\n    const s = sentence.trim();\n    if (s.length < 20) return false;  // Skip very short sentences\n    if (unwantedPatterns.some(pattern => pattern.test(s))) return false;  // Skip unwanted content\n    return true;\n  });\n  \n  return {\n    title: title,\n    text: sentences.join('. ').trim(),\n    sentences: sentences,\n    originalLength: html.length,\n    cleanLength: text.length\n  };\n}\n\n// Process all items and return array of results\nconst results = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  \n  try {\n    // Get the HTML content from current item\n    const html = item.binary?.data\n      ? Buffer.from(item.binary.data.data, 'base64').toString()\n      : item.json.body || item.json.data || item.json.html;\n\n    const url = item.json.url || `Item ${i + 1}`;\n    \n    console.log(`📄 Processing item ${i + 1}/${items.length}: ${url}`);\n    console.log(`   HTML length: ${html.length} characters`);\n    \n    const extracted = extractCleanText(html);\n    \n    console.log(`   ✅ Extracted: \"${extracted.title}\"`);\n    console.log(`   📝 Clean text: ${extracted.cleanLength} characters`);\n    console.log(`   📄 Found ${extracted.sentences.length} sentences`);\n    \n    results.push({\n      // Preserve original item data\n      ...item.json,\n      // Add extracted text data\n      title: extracted.title,\n      text: extracted.text,\n      sentences: extracted.sentences,\n      url: url,\n      wordCount: extracted.text.split(/\\s+/).length,\n      sentenceCount: extracted.sentences.length,\n      compressionRatio: Math.round((extracted.cleanLength / extracted.originalLength) * 100),\n      success: true,\n      itemIndex: i\n    });\n    \n  } catch (error) {\n    console.error(`❌ Error processing item ${i + 1}:`, error.message);\n    \n    results.push({\n      // Preserve original item data\n      ...item.json,\n      // Add error data\n      title: 'Error',\n      text: '',\n      url: item.json.url || `Item ${i + 1}`,\n      wordCount: 0,\n      success: false,\n      error: error.message,\n      itemIndex: i\n    });\n  }\n}\n\nconsole.log(`🎉 Completed processing ${results.length} items`);\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        600
+      ],
+      "id": "b44770d0-9d02-4670-88d5-9bde575f0c63",
+      "name": "to text"
+    },
+    {
+      "parameters": {
+        "content": "# Step 3: Loop In B2B Marketer\n## Parse sims and extract insights",
+        "height": 380,
+        "width": 900,
+        "color": 5
+      },
+      "id": "40e40629-1d71-4eb2-a715-8a5c24560876",
+      "name": "Sticky Note8",
+      "position": [
+        960,
+        640
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "# Generate Digest\n## News that converts, right in your inbox.\n",
+        "height": 320,
+        "width": 800,
+        "color": 4
+      },
+      "id": "2ec4127d-5e90-4bda-b2d4-ccab041cc1bf",
+      "name": "Sticky Note15",
+      "position": [
+        1880,
+        440
+      ],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "sendTo": "rhys@irrealitylabs.com",
+        "subject": "=📣 AskRally Daily Digest 🗞️ | {{ $json.date }}",
+        "message": "=<div style=\"font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;\">\n\n  <!-- Header Section -->\n  <div style=\"background-color: #c4d8bb; color: #32466c; padding: 30px; border-radius: 12px; margin-bottom: 30px; text-align: center;\">\n    <h1 style=\"margin: 0 0 10px 0; font-size: 28px; font-weight: bold;\">📣 AskRally Industry Daily Digest 🗞️</h1>\n  </div>\n  \n  <!-- Analytics Section -->\n  <div style=\"background-color: #ffffff; border-radius: 12px; padding: 25px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);\">\n    <h2 style=\"color: #333; margin-top: 0; margin-bottom: 20px; font-size: 24px; border-bottom: 3px solid #667eea; padding-bottom: 10px;\">\n      📈 Analytics\n    </h2>\n    \n    <div style=\"display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px;\">\n      \n      <div style=\"background-color: #f2d091; color: #243B6E; padding: 24px 18px; border-radius: 14px; text-align: center; font-weight: 600; box-shadow: 0 2px 4px rgba(36,59,110,0.08);\">\n        <div style=\"font-size: 32px; font-weight: bold; margin-bottom: 5px;\">{{ $json.analytics.simulations }}</div>\n        <div style=\"font-size: 14px; text-transform: uppercase; letter-spacing: 1px;\">Media Simulated</div>\n      </div>\n      \n      <div style=\"background: linear-gradient(135deg, #E0EEFC 0%, #B7CFE8 100%); color: #243B6E; padding: 24px 18px; border-radius: 14px; text-align: center; font-weight: 600; box-shadow: 0 2px 4px rgba(36,59,110,0.08);\">\n        <div style=\"font-size: 32px; font-weight: bold; margin-bottom: 5px;\">{{ $json.analytics.respondents }}</div>\n        <div style=\"font-size: 14px; text-transform: uppercase; letter-spacing: 1px;\">Respondents</div>\n      </div>\n      \n      <div style=\"background: linear-gradient(135deg, #E6F5F2 0%, #C4E4DF 100%); color: #243B6E; padding: 24px 18px; border-radius: 14px; text-align: center; font-weight: 600; box-shadow: 0 2px 4px rgba(36,59,110,0.08);\">\n        <div style=\"font-size: 32px; font-weight: bold; margin-bottom: 5px;\">\n          {{ Math.round(($json.analytics.proVotes / $json.analytics.respondents) * 100) }}%\n        </div>\n        <div style=\"font-size: 14px; text-transform: uppercase; letter-spacing: 1px;\">Pro Narrative Votes (A/B)</div>\n        <div style=\"font-size: 12px; opacity: 0.7; margin-top: 3px;\">{{ $json.analytics.proVotes }} votes</div>\n      </div>\n      \n      <div style=\"background: linear-gradient(135deg, #F1F4F7 0%, #D8DEE7 100%); color: #243B6E; padding: 24px 18px; border-radius: 14px; text-align: center; font-weight: 600; box-shadow: 0 2px 4px rgba(36,59,110,0.08);\">\n        <div style=\"font-size: 32px; font-weight: bold; margin-bottom: 5px;\">\n          {{ Math.round(($json.analytics.contraVotes / $json.analytics.respondents) * 100) }}%\n        </div>\n        <div style=\"font-size: 14px; text-transform: uppercase; letter-spacing: 1px;\">Contra Narrative Votes (D/E)</div>\n        <div style=\"font-size: 12px; opacity: 0.7; margin-top: 3px;\">{{ $json.analytics.contraVotes }} votes</div>\n      </div>\n      \n    </div>\n  </div>\n    <!-- Key Takeaway Section -->\n  <div style=\"background-color: #ffffff; border-radius: 12px; padding: 25px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);\">\n    <h2 style=\"color: #333; margin-top: 0; margin-bottom: 20px; font-size: 24px; border-bottom: 3px solid #667eea; padding-bottom: 10px;\">\n      💡 Key Takeaway\n    </h2>\n    <p style=\"color: #495057; line-height: 1.5; margin-bottom: 15px;\">\n      {{ $json.choices[0].message.content.insight }}\n    </p>\n    <div style=\"display: grid; grid-template-columns: 1fr 1fr; gap: 16px;\">\n      <div style=\"background-color: #e8f5e9; padding: 20px; border-radius: 8px;\">\n        <strong style=\"display: block; margin-bottom: 8px;\">Boost the meme:</strong>\n        {{ $json.choices[0].message.content.meme_to_boost }}\n {{ $json.choices[0].message.content.meme_to_nuke }}\n      </div>\n      <div style=\"background-color: #ffebee; padding: 20px; border-radius: 8px;\">\n        <strong style=\"display: block; margin-bottom: 8px;\">Objections:</strong>\n      {{ $json.choices[0].message.content.objections }}\n      </div>\n    </div>\n  </div>\n\n  <!-- Simulations Section -->\n  <div style=\"background-color: #ffffff; border-radius: 12px; padding: 25px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);\">\n    <h2 style=\"color: #333; margin-top: 0; margin-bottom: 20px; font-size: 24px; border-bottom: 3px solid #667eea; padding-bottom: 10px;\">\n      🔬 Simulations\n    </h2>\n    \n    {{\n      (() => {\n        const simulations = $json.simulations || [];\n        if (simulations.length === 0) {\n          return '<p style=\"color: #6c757d; font-style: italic;\">No simulations found for today.</p>';\n        }\n        \n        let html = '';\n        simulations.forEach((sim, index) => {\n          // Determine result type styling\n          let resultBadgeStyle = '';\n          let resultIcon = '';\n          \n          if (sim.resultType === 'pro-narrative') {\n            resultBadgeStyle = 'background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%); color: white;';\n            resultIcon = '🟢';\n          } else if (sim.resultType === 'contra-narrative') {\n            resultBadgeStyle = 'background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%); color: white;';\n            resultIcon = '🔴';\n          } else {\n            resultBadgeStyle = 'background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%); color: white;';\n            resultIcon = '⚪';\n          }\n          \n          // Create the article URL with fallback\n          const articleUrl = sim.articleUrl && sim.articleUrl !== '#' ? sim.articleUrl : '#';\n          \n          html += `\n          <div style=\"border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 20px; background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);\">\n            \n            <div style=\"display: flex; align-items: center; margin-bottom: 15px;\">\n              <span style=\"${resultBadgeStyle} padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-right: 10px;\">\n                ${resultIcon} ${sim.resultType.toUpperCase().replace('-', ' ')}\n              </span>\n            </div>\n            \n            <h3 style=\"margin: 0 0 10px 0; font-size: 18px; line-height: 1.4;\">\n              📄 <a href=\"${articleUrl}?utm_source=api&utm_medium=email&utm_campaign=daily-digest\" style=\"color: #495057; text-decoration: none;\">${sim.title}</a>\n            </h3>\n            \n            <div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 15px;\">\n              <strong style=\"color: #495057;\">Results:</strong> ${sim.results}\n              <br>\n              <small style=\"color: #6c757d; margin-top: 5px; display: block;\">\n                ${sim.detailedResults.breakdown} | Total Voters: ${sim.detailedResults.totalVoters}\n              </small>\n            </div>\n            \n            <div style=\"border-left: 4px solid #667eea; padding-left: 15px;\">\n              <strong style=\"color: #495057;\">Summary:</strong>\n              <p style=\"margin: 8px 0 0 0; color: #495057; line-height: 1.5; font-style: italic;\">\n                \"${sim.summary}\"\n              </p>\n            </div>\n            \n          </div>`;\n        });\n        \n        return html;\n      })()\n    }}\n  </div>\n  \n  <!-- Sampled Quotes Section -->\n  <div style=\"background-color: #ffffff; border-radius: 12px; padding: 25px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);\">\n    <h2 style=\"color: #333; margin-top: 0; margin-bottom: 20px; font-size: 24px; border-bottom: 3px solid #667eea; padding-bottom: 10px;\">\n      💬 Sampled Quotes\n    </h2>\n    \n    {{\n      (() => {\n        const sampledQuotes = $json.sampledQuotes || [];\n        if (sampledQuotes.length === 0) {\n          return '<p style=\"color: #6c757d; font-style: italic;\">No quotes available for today.</p>';\n        }\n        \n        let html = '';\n        sampledQuotes.forEach((article, index) => {\n          // Create the article URL with fallback\n          const articleUrl = article.articleUrl && article.articleUrl !== '#' ? article.articleUrl : '#';\n          \n          html += `\n          <div style=\"border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 25px; background-color: #fafafa;\">\n            \n            <h3 style=\"margin: 0 0 20px 0; font-size: 16px; font-weight: bold;\">\n              📄 <a href=\"${articleUrl}?utm_source=api&utm_medium=email&utm_campaign=daily-digest\" style=\"color: #495057; text-decoration: none;\">${article.title}</a>\n            </h3>\n            \n            <div style=\"display: grid; gap: 15px;\">`;\n            \n            // Pro Narrative Quotes\n            if (article.quotes.pro && article.quotes.pro.length > 0) {\n              html += `\n                <div style=\"background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); border-left: 4px solid #28a745; padding: 15px; border-radius: 6px;\">\n                  <h4 style=\"margin: 0 0 10px 0; color: #155724; font-size: 14px; font-weight: bold;\">🟢 Pro Narrative (${article.quotes.pro.length} quotes)</h4>`;\n                \n                article.quotes.pro.forEach((quote, i) => {\n                  const optionLabel = {\n                    'A': 'Much more interested',\n                    'B': 'Somewhat more interested'\n                  }[quote.option] || quote.option;\n                  \n                  html += `\n                    <div style=\"background-color: rgba(255,255,255,0.7); padding: 10px; border-radius: 4px; margin-bottom: 8px;\">\n                      <small style=\"color: #155724; font-weight: bold;\">${quote.option} - ${optionLabel}</small>\n                      <p style=\"margin: 5px 0 0 0; color: #155724; font-size: 13px; line-height: 1.4;\">\n                        \"${quote.thinking}\"\n                      </p>\n                    </div>`;\n                });\n                html += `</div>`;\n              }\n              \n              // Contra Narrative Quotes  \n              if (article.quotes.contra && article.quotes.contra.length > 0) {\n                html += `\n                  <div style=\"background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%); border-left: 4px solid #dc3545; padding: 15px; border-radius: 6px;\">\n                    <h4 style=\"margin: 0 0 10px 0; color: #721c24; font-size: 14px; font-weight: bold;\">🔴 Contra Narrative (${article.quotes.contra.length} quotes)</h4>`;\n                \n                article.quotes.contra.forEach((quote, i) => {\n                  const optionLabel = {\n                    'D': 'Somewhat less interested',\n                    'E': 'Much less interested'\n                  }[quote.option] || quote.option;\n                  \n                  html += `\n                    <div style=\"background-color: rgba(255,255,255,0.7); padding: 10px; border-radius: 4px; margin-bottom: 8px;\">\n                      <small style=\"color: #721c24; font-weight: bold;\">${quote.option} - ${optionLabel}</small>\n                      <p style=\"margin: 5px 0 0 0; color: #721c24; font-size: 13px; line-height: 1.4;\">\n                        \"${quote.thinking}\"\n                      </p>\n                    </div>`;\n                });\n                html += `</div>`;\n              }\n              \n              // Neutral Quotes\n              if (article.quotes.neutral && article.quotes.neutral.length > 0) {\n                html += `\n                  <div style=\"background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); border-left: 4px solid #ffc107; padding: 15px; border-radius: 6px;\">\n                    <h4 style=\"margin: 0 0 10px 0; color: #856404; font-size: 14px; font-weight: bold;\">⚪ Neutral (${article.quotes.neutral.length} quotes)</h4>`;\n                \n                article.quotes.neutral.forEach((quote, i) => {\n                  html += `\n                    <div style=\"background-color: rgba(255,255,255,0.7); padding: 10px; border-radius: 4px; margin-bottom: 8px;\">\n                      <small style=\"color: #856404; font-weight: bold;\">C - No change</small>\n                      <p style=\"margin: 5px 0 0 0; color: #856404; font-size: 13px; line-height: 1.4;\">\n                        \"${quote.thinking}\"\n                      </p>\n                    </div>`;\n                });\n                html += `</div>`;\n              }\n              \n              html += `\n                </div>\n              </div>`;\n        });\n        \n        return html;\n      })()\n    }}\n  </div>\n  \n  <!-- Footer -->\n  <div style=\"background-color: #6c757d; color: white; padding: 20px; border-radius: 12px; text-align: center;\">\n    <p style=\"margin: 0; font-size: 14px; opacity: 0.8;\">\n      Powered by <a href=\"https://askrally.com/?utm_source=api&utm_medium=email&utm_campaign=daily-digest\" style=\"color: #ffffff; text-decoration: none; font-weight: bold;\">AskRally.com</a>\n    </p>\n  </div>\n  \n  </div> ",
         "options": {}
       },
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        1840,
-        0
+        2480,
+        580
       ],
-      "id": "eb63694e-b291-4d24-a1ee-c87a5a4304ce",
+      "id": "a7535582-51e7-486e-b87b-0d645b579e52",
       "name": "Gmail",
       "webhookId": "d47ea3ca-9545-4638-a6f5-b25374cf0760",
       "credentials": {
@@ -75,177 +342,418 @@
     },
     {
       "parameters": {
-        "content": "## Dedup + Extract content from RSS alert",
-        "height": 300,
-        "width": 800
-      },
-      "id": "390bb7a2-3e59-4824-af8b-be188c49284d",
-      "name": "Sticky Note",
-      "position": [
-        -60,
-        -120
-      ],
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1
-    },
-    {
-      "parameters": {
-        "content": "## Ask Rally",
-        "height": 300,
-        "width": 720,
-        "color": 5
-      },
-      "id": "3a1c9b9b-192c-499a-be4a-0edaf4b6bf47",
-      "name": "Sticky Note4",
-      "position": [
-        760,
-        -120
-      ],
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// Process each Rally API response individually\nconst item = $input.item.json;\n\nlet voteCounts = { A: 0, B: 0, C: 0, D: 0, E: 0 };\nlet totalVoters = 0;\nlet responses = [];\n\ntry {\n  // The Rally API response is in 'responses' array\n  if (item.responses && Array.isArray(item.responses)) {\n    totalVoters = item.responses.length;\n    \n    for (const personaResponse of item.responses) {\n      try {\n        // Parse each persona's response\n        const data = JSON.parse(personaResponse.response);\n        const option = data.option;\n        \n        if (option && voteCounts.hasOwnProperty(option)) {\n          voteCounts[option]++;\n        }\n        \n        responses.push({\n          persona_id: personaResponse.persona_id,\n          option: option,\n          thinking: data.thinking || '',\n          thoughts: personaResponse.thoughts\n        });\n        \n      } catch (parseErr) {\n        console.log(`Error parsing persona ${personaResponse.persona_id} response:`, parseErr.message);\n      }\n    }\n  }\n} catch (err) {\n  console.log('Error processing Rally response:', err.message);\n}\n\n// Calculate percentages for this individual simulation\nconst percentages = {};\nfor (const opt of Object.keys(voteCounts)) {\n  percentages[opt] = totalVoters > 0\n    ? Math.round((voteCounts[opt] / totalVoters) * 100)\n    : 0;\n}\n\nconst proNarrative = percentages.A + percentages.B;\nconst contraNarrative = percentages.D + percentages.E;\nconst neutral = percentages.C;\n\n// Determine narrative type and select sample responses\nlet notificationType = '';\nlet sampleResponses = [];\n\nif (proNarrative >= 75) {\n  notificationType = 'pro-narrative';\n  // Get 5 random responses from A & B voters\n  const proResponses = responses.filter(r => ['A', 'B'].includes(r.option));\n  sampleResponses = proResponses.sort(() => 0.5 - Math.random()).slice(0, 5);\n} else if (contraNarrative >= 75) {\n  notificationType = 'contra-narrative';\n  // Get 5 random responses from D & E voters\n  const contraResponses = responses.filter(r => ['D', 'E'].includes(r.option));\n  sampleResponses = contraResponses.sort(() => 0.5 - Math.random()).slice(0, 5);\n} else {\n  notificationType = 'mixed';\n  // Get 5 random responses from all voters\n  sampleResponses = responses.sort(() => 0.5 - Math.random()).slice(0, 5);\n}\n\n// Return individual result for this RSS item\nreturn {\n  // Rally simulation metadata\n  session_id: item.session_id || '',\n  title: item.title || 'Interest in Synthetic Research Spending',\n  \n  // Rally simulation results\n  totalVoters,\n  voteCounts,\n  percentages,\n  proNarrative,\n  contraNarrative,\n  neutral,\n  responses,\n  summary: item.summary || '',\n  \n  // Pre-selected sample responses for email\n  sampleResponses,\n  notificationType,\n  \n  // Metadata\n  simulationId: item.session_id || `sim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n  \n  // Debug info\n  debug: {\n    foundResponses: !!item.responses,\n    responseCount: item.responses ? item.responses.length : 0,\n    hasSessionId: !!item.session_id,\n    sampleResponsesCount: sampleResponses.length\n  }\n};"
+        "jsCode": "// Daily Digest Aggregator - Run this on a daily schedule (e.g., 8 PM)\n// This aggregates all the day's rally results into a digest format\n\n// Get all items from the input (either from database query or storage node)\nconst inputItems = $input.all();\nconst today = new Date().toISOString().split('T')[0];\n\n// Debug: Log what we received\nconsole.log('Input items received:', inputItems.length);\nconsole.log('Sample item structure:', inputItems[0] ? Object.keys(inputItems[0].json || inputItems[0]) : 'No items');\n\nif (!inputItems || inputItems.length === 0) {\n  return {\n    skipEmail: true,\n    message: \"No results for today\",\n    date: today\n  };\n}\n\n// Process the results - handle both raw Rally data and pre-processed data\nconst todaysResults = inputItems.map(item => {\n  const data = item.json || item; // Handle n8n item format\n  \n  // If this is raw Rally data, process it first\n  if (!data.analytics && data.voteCounts) {\n    const voteCounts = data.voteCounts || { A: 0, B: 0, C: 0, D: 0, E: 0 };\n    const totalVoters = data.totalVoters || 0;\n    const responses = data.responses || [];\n    \n    // Calculate percentages\n    const percentages = {};\n    for (const opt of Object.keys(voteCounts)) {\n      percentages[opt] = totalVoters > 0\n        ? Math.round((voteCounts[opt] / totalVoters) * 100)\n        : 0;\n    }\n    \n    // Calculate narrative aggregates\n    const proNarrative = percentages.A + percentages.B;\n    const contraNarrative = percentages.D + percentages.E;\n    const neutral = percentages.C;\n    \n    // Determine result type\n    let resultType;\n    if (proNarrative >= 75) {\n      resultType = 'pro-narrative';\n    } else if (contraNarrative >= 75) {\n      resultType = 'contra-narrative';\n    } else {\n      resultType = 'mixed';\n    }\n    \n    // Extract sample quotes by sentiment\n    const sampleQuotes = {\n      pro: [],\n      contra: [],\n      neutral: []\n    };\n    \n    responses.forEach(response => {\n      const quote = {\n        persona_id: response.persona_id,\n        option: response.option,\n        thinking: response.thinking,\n        sentiment: null\n      };\n      \n      if (['A', 'B'].includes(response.option)) {\n        quote.sentiment = 'pro';\n        if (sampleQuotes.pro.length < 5) sampleQuotes.pro.push(quote);\n      } else if (['D', 'E'].includes(response.option)) {\n        quote.sentiment = 'contra';\n        if (sampleQuotes.contra.length < 5) sampleQuotes.contra.push(quote);\n      } else if (response.option === 'C') {\n        quote.sentiment = 'neutral';\n        if (sampleQuotes.neutral.length < 5) sampleQuotes.neutral.push(quote);\n      }\n    });\n    \n    return {\n      session_id: data.session_id,\n      title: data.title,\n      articleTitle: data.articleTitle || data.article_title || data.title, // Original article title\n      articleUrl: data.articleUrl || data.article_url || data.url, // Original article URL\n      totalVoters,\n      voteCounts,\n      percentages,\n      proNarrative,\n      contraNarrative: contraNarrative,\n      neutral,\n      resultType,\n      summary: data.summary,\n      sampleQuotes,\n      analytics: {\n        totalVoters,\n        proVotes: voteCounts.A + voteCounts.B,\n        contraVotes: voteCounts.D + voteCounts.E,\n        neutralVotes: voteCounts.C\n      }\n    };\n  }\n  \n  // If already processed, return as-is\n  return data;\n});\n\nconsole.log('Processed results:', todaysResults.length);\n\n// ANALYTICS SECTION\nlet totalSimulations = todaysResults.length;\nlet totalRespondents = 0;\nlet totalProVotes = 0;\nlet totalContraVotes = 0;\n\ntodaysResults.forEach(result => {\n  // Handle both processed and raw data formats safely\n  const analytics = result.analytics || {};\n  const totalVoters = analytics.totalVoters || result.totalVoters || 0;\n  const proVotes = analytics.proVotes || (result.voteCounts ? result.voteCounts.A + result.voteCounts.B : 0);\n  const contraVotes = analytics.contraVotes || (result.voteCounts ? result.voteCounts.D + result.voteCounts.E : 0);\n  \n  totalRespondents += totalVoters;\n  totalProVotes += proVotes;\n  totalContraVotes += contraVotes;\n});\n\nconst analytics = {\n  simulations: totalSimulations,\n  respondents: totalRespondents,\n  proVotes: totalProVotes,\n  contraVotes: totalContraVotes\n};\n\n// SIMULATIONS SECTION\nconst simulations = todaysResults.map(result => {\n  // Safely access properties with defaults\n  const articleTitle = result.articleTitle || result.title || 'Untitled Article';\n  const articleUrl = result.articleUrl || '#';\n  const proNarrative = result.proNarrative || 0;\n  const contraNarrative = result.contraNarrative || result.contra_narrative || 0;\n  const neutral = result.neutral || 0;\n  const totalVoters = result.totalVoters || 0;\n  const percentages = result.percentages || { A: 0, B: 0, C: 0, D: 0, E: 0 };\n  const summary = result.summary || 'No summary available';\n  const resultType = result.resultType || result.result_type || 'mixed';\n  \n  return {\n    title: articleTitle,\n    articleUrl,\n    results: `${proNarrative}% Pro | ${contraNarrative}% Contra | ${neutral}% Neutral`,\n    detailedResults: {\n      totalVoters,\n      proNarrative,\n      contraNarrative,\n      neutral,\n      breakdown: `A: ${percentages.A}%, B: ${percentages.B}%, C: ${percentages.C}%, D: ${percentages.D}%, E: ${percentages.E}%`\n    },\n    summary,\n    resultType\n  };\n});\n\n// SAMPLED QUOTES SECTION\nconst sampledQuotes = todaysResults.map(result => {\n  // Get 2 from each category, fallback if not enough\n  const getQuotes = (quotes, count) => {\n    if (!quotes || !Array.isArray(quotes)) return [];\n    return quotes.slice(0, count).map(q => ({\n      option: q.option || 'Unknown',\n      thinking: q.thinking || 'No response available' // Show full quotes without truncation\n    }));\n  };\n  \n  const sampleQuotes = result.sampleQuotes || { pro: [], contra: [], neutral: [] };\n  \n  return {\n    title: result.articleTitle || result.title || 'Untitled Article',\n    articleUrl: result.articleUrl || '#',\n    quotes: {\n      pro: getQuotes(sampleQuotes.pro, 2),\n      contra: getQuotes(sampleQuotes.contra, 2),\n      neutral: getQuotes(sampleQuotes.neutral, 2)\n    }\n  };\n});\n\n// Compile the final digest\nconst digest = {\n  date: today,\n  analytics,\n  simulations,\n  sampledQuotes,\n  \n  // Metadata for email\n  skipEmail: false,\n  subject: `Rally Research Daily Digest - ${new Date().toLocaleDateString('en-US', { \n    weekday: 'long', \n    year: 'numeric', \n    month: 'long', \n    day: 'numeric' \n  })}`,\n  \n  // Summary stats for subject line\n  summaryStats: {\n    totalSimulations,\n    totalRespondents,\n    avgProNarrative: totalSimulations > 0 ? Math.round(todaysResults.reduce((sum, r) => sum + (r.proNarrative || 0), 0) / totalSimulations) : 0,\n    topResultType: todaysResults.reduce((acc, result) => {\n      const resultType = result.resultType || result.result_type || 'mixed';\n      acc[resultType] = (acc[resultType] || 0) + 1;\n      return acc;\n    }, {})\n  }\n};\n\nreturn digest; "
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1160,
-        0
+        2080,
+        580
       ],
-      "id": "c3d20aa4-83f8-4398-8537-9580450f8736",
-      "name": "analyze simulation results"
-    },
-    {
-      "parameters": {
-        "content": "## Send an Alert",
-        "height": 300,
-        "width": 540,
-        "color": 6
-      },
-      "id": "a0620b7b-b18c-4568-aa67-6b6a180134a1",
-      "name": "Sticky Note1",
-      "position": [
-        1500,
-        -120
-      ],
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1
+      "id": "afc48910-a67e-4a28-bbee-1ede72b984d0",
+      "name": "Aggregator"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Process each Rally API response individually\nconst item = $input.item.json;\n\n// The data is already processed - just extract what we need\nconst voteCounts = item.voteCounts || { A: 0, B: 0, C: 0, D: 0, E: 0 };\nconst totalVoters = item.totalVoters || 0;\nconst responses = item.responses || [];\n\n// Calculate percentages\nconst percentages = {};\nfor (const opt of Object.keys(voteCounts)) {\n  percentages[opt] = totalVoters > 0\n    ? Math.round((voteCounts[opt] / totalVoters) * 100)\n    : 0;\n}\n\n// Calculate narrative aggregates\nconst proNarrative = percentages.A + percentages.B;\nconst contraNarrative = percentages.D + percentages.E;\nconst neutral = percentages.C;\n\n// Determine notification type\nlet notificationType, message;\nif (proNarrative >= 75) {\n  notificationType = 'pro-narrative';\n  message = `🟢 Pro-Narrative Detected: ${proNarrative}% voted A+B ` +\n            `(${percentages.A}% A, ${percentages.B}% B)`;\n} else if (contraNarrative >= 75) {\n  notificationType = 'contra-narrative';\n  message = `🔴 Contra-Narrative Detected: ${contraNarrative}% voted D+E ` +\n            `(${percentages.D}% D, ${percentages.E}% E)`;\n} else {\n  notificationType = 'mixed';\n  message = `⚪ Mixed Response: Pro=${proNarrative}%, ` +\n            `Contra=${contraNarrative}%, Neutral=${neutral}%`;\n}\n\n// Select sample responses based on narrative type\nlet sampleResponses = [];\nif (responses.length > 0) {\n  let targetOptions = [];\n  \n  if (notificationType === 'pro-narrative') {\n    targetOptions = ['A', 'B'];\n  } else if (notificationType === 'contra-narrative') {\n    targetOptions = ['D', 'E'];\n  } else {\n    // For mixed, get a variety\n    targetOptions = ['A', 'B', 'C', 'D', 'E'];\n  }\n  \n  // Filter responses by target options and take up to 5\n  sampleResponses = responses\n    .filter(r => targetOptions.includes(r.option))\n    .slice(0, 5);\n}\n\n// Return the processed data\nreturn {\n  session_id: item.session_id,\n  title: item.title,\n  totalVoters,\n  voteCounts,\n  percentages,\n  proNarrative,\n  contraNarrative,\n  neutral,\n  responses,\n  summary: item.summary,\n  sampleResponses,\n  notificationType,\n  message,\n  simulationId: item.session_id,\n  shouldNotify: proNarrative >= 75 || contraNarrative >= 75,\n  debug: {\n    foundResponses: responses.length > 0,\n    responseCount: responses.length,\n    hasSessionId: !!item.session_id,\n    sampleResponsesCount: sampleResponses.length\n  }\n};"
+        "jsCode": "// Daily Digest Data Processor - Replace your current trigger\n// This processes each Rally API response and stores it for daily digest\n\nconst item = $input.item.json;\nconst today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD\n\n// Process the individual result\nconst voteCounts = item.voteCounts || { A: 0, B: 0, C: 0, D: 0, E: 0 };\nconst totalVoters = item.totalVoters || 0;\nconst responses = item.responses || [];\n\n// Calculate percentages\nconst percentages = {};\nfor (const opt of Object.keys(voteCounts)) {\n  percentages[opt] = totalVoters > 0\n    ? Math.round((voteCounts[opt] / totalVoters) * 100)\n    : 0;\n}\n\n// Calculate narrative aggregates\nconst proNarrative = percentages.A + percentages.B;\nconst contraNarrative = percentages.D + percentages.E;\nconst neutral = percentages.C;\n\n// Determine result type for categorization\nlet resultType;\nif (proNarrative >= 75) {\n  resultType = 'pro-narrative';\n} else if (contraNarrative >= 75) {\n  resultType = 'contra-narrative';\n} else {\n  resultType = 'mixed';\n}\n\n// Extract sample quotes by sentiment\nconst sampleQuotes = {\n  pro: [],\n  contra: [],\n  neutral: []\n};\n\n// Categorize responses by voting pattern\nresponses.forEach(response => {\n  const quote = {\n    persona_id: response.persona_id,\n    option: response.option,\n    thinking: response.thinking,\n    sentiment: null\n  };\n  \n  // Categorize based on vote\n  if (['A', 'B'].includes(response.option)) {\n    quote.sentiment = 'pro';\n    if (sampleQuotes.pro.length < 5) sampleQuotes.pro.push(quote);\n  } else if (['D', 'E'].includes(response.option)) {\n    quote.sentiment = 'contra';\n    if (sampleQuotes.contra.length < 5) sampleQuotes.contra.push(quote);\n  } else if (response.option === 'C') {\n    quote.sentiment = 'neutral';\n    if (sampleQuotes.neutral.length < 5) sampleQuotes.neutral.push(quote);\n  }\n});\n\n// Prepare data for storage\nconst processedResult = {\n  date: today,\n  session_id: item.session_id,\n  title: item.title,\n  totalVoters,\n  voteCounts,\n  percentages,\n  proNarrative,\n  contraNarrative,\n  neutral,\n  resultType,\n  summary: item.summary,\n  sampleQuotes,\n  timestamp: new Date().toISOString(),\n  \n  // For analytics aggregation\n  analytics: {\n    totalVoters,\n    proVotes: voteCounts.A + voteCounts.B,\n    contraVotes: voteCounts.D + voteCounts.E,\n    neutralVotes: voteCounts.C\n  }\n};\n\nreturn processedResult; "
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1580,
-        0
+        1920,
+        580
       ],
-      "id": "889d4d3d-3f57-44d8-82c9-87da3fcbd94e",
-      "name": "alert trigger"
+      "id": "154a2bc6-5586-4a89-ae25-a4ba91da6628",
+      "name": "Processor"
     },
     {
       "parameters": {
-        "url": "https://www.google.com/alerts/feeds/12254772602100657129/16808085471630190739",
+        "mode": "combine",
+        "combineBy": "combineByPosition",
         "options": {}
       },
-      "type": "n8n-nodes-base.rssFeedRead",
-      "typeVersion": 1.2,
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
       "position": [
-        0,
-        0
+        1560,
+        460
       ],
-      "id": "8874bf82-4182-4846-ba83-77299a357323",
-      "name": "RSS Read"
+      "id": "c672cb7a-64d8-4a28-a7d6-ab5b30f8d7bf",
+      "name": "Merge2"
     },
     {
       "parameters": {
-        "rule": {
-          "interval": [
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2300,
+        580
+      ],
+      "id": "9d93ba73-a1ae-41a9-968a-5279bb51b632",
+      "name": "Merge3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten all simulations that arrive on the wire\nconst sims = $input.all().flatMap(item => {\n  // Each item may already wrap its data under simulation_results\n  const arr = item.json.simulation_results ?? [item.json];\n\n  // Pick just the fields we want from every simulation object\n  return arr.map(({ percentages, summary, sampleResponses }) => ({\n    percentages,\n    summary,\n    sampleResponses\n  }));\n});\n\n// Return one tidy object\nreturn [\n  {\n    json: { simulation_results: sims }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1020,
+        760
+      ],
+      "id": "2a1f8555-6054-47b7-9336-ba327b27b9af",
+      "name": "// Flatten all simulations"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "o3-mini",
+          "mode": "list",
+          "cachedResultName": "O3-MINI"
+        },
+        "messages": {
+          "values": [
             {
-              "field": "hours",
-              "hoursInterval": 2
+              "content": "You are a B2B GTM strategist.\n\nTASK  \n-----\nParse *every* simulation’s `percentages` and `sampleResponses`.\n\n1. **Theme mining**  \n   • List the narrative motifs that appear in ≥ 2 “A/B” comments (what excites buyers).  \n   • List the motifs that appear in ≥ 2 “D/E” comments (what scares buyers aka objections).  \n   • For each motif give a one-line proof quote (trimmed) and a tally of how many times it shows up.\n\n2. **Counter-intuition hunt**  \n   • Compare the two lists. Look for a pattern that is *not* obvious from headline voting alone   \n   • Formulate one commercially valuable insight: a sentence that reveals this hidden tension and how to exploit it in messaging.\n   • the commercially valuable insight should be relevant for {your product name], {product description}.\n\n3. **Craft two memes**  \n   • *meme_to_boost* – <60 chars; amplifies a winning motif.  \n   • *meme_to_nuke* – <60 chars; disarms a losing motif.\n\nOUTPUT  \n------\nReturn **only** a JSON object that follows exactly this schema & order\n(keep keys snake_case, no extra keys, max 280 chars total per string):\n\n```json\n{\n  \"insight\": \"string\",\n  \"meme_to_boost\": \"string\",\n  \"meme_to_nuke\": \"string\",\n  \"objections\": \"string\",\n}\n• Do not summarise anything outside the JSON.\n\n",
+              "role": "=system"
+            },
+            {
+              "content": "=“simulation_results”: {{ JSON.stringify(\n     $json.simulation_results.map(\n       ({ percentages, sampleResponses }) =>\n         ({ percentages, sampleResponses })\n     ),\n     null,\n     2\n) }}\n\n"
             }
           ]
-        }
-      },
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        -260,
-        0
-      ],
-      "id": "63dcaba0-650d-42fb-b2c5-9ef9447e7f3a",
-      "name": "Schedule Trigger"
-    },
-    {
-      "parameters": {
-        "jsCode": "// Multi-item deduplication + URL extraction\nconst items = $input.all();\nconst hoursThreshold = 3; // Adjust as needed (24 hours = 1 day)\nconst now = new Date();\n\nconsole.log(`Processing ${items.length} RSS items for deduplication and URL extraction`);\n\nconst processedItems = items.filter((item, index) => {\n  try {\n    // First: Check age for deduplication\n    const pubDate = new Date(item.json.pubDate || item.json.isoDate);\n    const ageInHours = (now - pubDate) / (1000 * 60 * 60);\n    \n    console.log(`Item ${index}: \"${item.json.title}\" - Age: ${ageInHours.toFixed(1)} hours`);\n    \n    if (ageInHours <= hoursThreshold) {\n      console.log(`✅ Item ${index} passed filter (within ${hoursThreshold} hours)`);\n      return true;\n    } else {\n      console.log(`❌ Item ${index} filtered out (older than ${hoursThreshold} hours)`);\n      return false;\n    }\n  } catch (error) {\n    console.log(`⚠️ Error processing item ${index}:`, error.message);\n    return false;\n  }\n}).map(item => {\n  // Second: Extract clean URL for items that passed the filter\n  const originalUrl = item.json.link;\n  let cleanUrl = originalUrl;\n  \n  // Handle Google redirect URLs (from Google Alerts)\n  if (originalUrl && originalUrl.includes('google.com/url')) {\n    const match = originalUrl.match(/[&?]url=([^&]+)/);\n    if (match) {\n      try {\n        cleanUrl = decodeURIComponent(match[1]);\n        console.log(`🔗 URL extracted: ${originalUrl} → ${cleanUrl}`);\n      } catch (error) {\n        console.log('URL decode error:', error);\n        cleanUrl = originalUrl;\n      }\n    }\n  }\n  \n  // Return item with clean URL added\n  return {\n    json: {\n      ...item.json,\n      cleanUrl: cleanUrl\n    }\n  };\n});\n\nconsole.log(`Final result: ${processedItems.length} items processed with clean URLs`);\n\nreturn processedItems;"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        200,
-        0
-      ],
-      "id": "a15c2ecb-a6bf-4546-b989-4edf480227f9",
-      "name": "Dedup + url extraction"
-    },
-    {
-      "parameters": {
-        "url": "={{ \n  (() => {\n    const url = $json.link;\n    if (url.includes('google.com/url')) {\n      const match = url.match(/[&?]url=([^&]+)/);\n      return match ? decodeURIComponent(match[1]) : url;\n    }\n    return url;\n  })() \n}}",
+        },
+        "simplify": false,
+        "jsonOutput": true,
         "options": {}
       },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "id": "a5c9af5d-bc77-4a51-8dbf-4454f2a7cd1c",
+      "name": "B2B GTM strategist",
       "position": [
-        400,
-        0
+        1280,
+        760
       ],
-      "id": "bb7083f6-b6bd-45cb-ba85-9c45457d3af2",
-      "name": "Get Content"
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "5LyzIG7SUcgxGxlz",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "<- Here is where you config your prompt\n",
+        "height": 80,
+        "width": 220,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        540
+      ],
+      "id": "2a6f7531-2019-4fcc-a4db-d1e26fac80b6",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "<- add your product name/desc to prompt",
+        "height": 80,
+        "width": 220,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        840
+      ],
+      "id": "b9d75ffc-4695-44f4-ba46-5312a1104927",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "<- Make sure to add your RSS links",
+        "height": 80,
+        "width": 220,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        220
+      ],
+      "id": "051253bf-221f-4219-a3b7-a57404c5ec47",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "<- Auth with your API key",
+        "height": 80,
+        "width": 220,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1420,
+        380
+      ],
+      "id": "b06e8d4d-e369-4a0c-9119-770e72180f6f",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "<- Add your email",
+        "height": 80,
+        "width": 220,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2600,
+        580
+      ],
+      "id": "a3bd6364-1f86-4925-8507-36156b1cea45",
+      "name": "Sticky Note7"
     }
   ],
   "pinData": {},
   "connections": {
-    "Code": {
+    "filter": {
       "main": [
         [
           {
-            "node": "HTTP Request",
+            "node": "HTTP: Get Content1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "HTTP Request": {
+    "Merge": {
       "main": [
         [
           {
-            "node": "analyze simulation results",
+            "node": "filter",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "analyze simulation results": {
+    "prep simulation": {
       "main": [
         [
           {
-            "node": "alert trigger",
+            "node": "call AskRally",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "call AskRally": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "alert trigger": {
+    "analyze simulation results1": {
+      "main": [
+        [
+          {
+            "node": "// Flatten all simulations",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Processor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read6": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "RSS Read6",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read7",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read8",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read9",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read10",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read11",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read7": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "RSS Read8": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "RSS Read9": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "RSS Read10": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "RSS Read11": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "HTTP: Get Content1": {
+      "main": [
+        [
+          {
+            "node": "to text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "to text": {
+      "main": [
+        [
+          {
+            "node": "prep simulation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregator": {
+      "main": [
+        [
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processor": {
+      "main": [
+        [
+          {
+            "node": "Aggregator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "analyze simulation results1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge3": {
       "main": [
         [
           {
@@ -256,67 +764,37 @@
         ]
       ]
     },
-    "RSS Read": {
+    "// Flatten all simulations": {
       "main": [
         [
           {
-            "node": "Dedup + url extraction",
+            "node": "B2B GTM strategist",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Schedule Trigger": {
+    "B2B GTM strategist": {
       "main": [
         [
           {
-            "node": "RSS Read",
+            "node": "Merge3",
             "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Dedup + url extraction": {
-      "main": [
-        [
-          {
-            "node": "Get Content",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Get Content": {
-      "main": [
-        [
-          {
-            "node": "Code",
-            "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "78058eb2-dfaa-44bd-8a20-0906b547d699",
+  "versionId": "b7c8516d-c499-4d66-830e-4a0cac9c6eff",
   "meta": {
-    "templateCredsSetupCompleted": true,
     "instanceId": "7921b3cd29c1121b3ec4f2177acf06fe1f1325838297f593db7db4e9563eb98d"
   },
-  "id": "bHmHHEt75JaovVaB",
-  "tags": [
-    {
-      "createdAt": "2025-06-22T22:10:20.475Z",
-      "updatedAt": "2025-06-22T22:10:20.475Z",
-      "id": "G8kDAqCFw5rVCOgs",
-      "name": "News Pipeline Testing"
-    }
-  ]
+  "id": "S3f2k03ZtAlcsEzl",
+  "tags": []
 }
